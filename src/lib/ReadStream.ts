@@ -40,8 +40,8 @@ export default class ReadStream {
 
     accept(receiveTimeout: number | null = 5000) {
         if(this.state !== StreamState.Pending) return;
-        this.communicator._sendStreamAccept(this.id);
         (this as Writeable<ReadStream>).state = StreamState.Open;
+        this.communicator._sendStreamAccept(this.id);
         if(receiveTimeout != null) this.setReceiveTimeout(receiveTimeout);
     }
 
