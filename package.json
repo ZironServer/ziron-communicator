@@ -1,0 +1,47 @@
+{
+  "name": "ziron",
+  "description": "The protocol implementation that Zation core and client uses.",
+  "version": "0.0.5",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "SEE LICENSE IN <https://github.com/ZationServer/zation/wiki/Zation-End-User-License-Agreement>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZationServer/ziron.git"
+  },
+  "author": {
+    "name": "Luca Scaringella",
+    "email": "lucacode1@gmail.com",
+    "url": "https://luca.scaringella.de"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "dependencies": {
+    "@types/node": "^14.0.20"
+  },
+  "devDependencies": {
+    "typescript": "^3.7.5",
+    "gulp": "4.0.2",
+    "gulp-optimize-js": "1.1.0",
+    "gulp-terser": "1.2.0",
+    "gulp-typescript": "^5.0.1",
+    "del": "^5.1.0",
+    "ts-node": "^8.0.3",
+    "mocha": "7.0.1",
+    "@types/mocha": "^7.0.2",
+    "chai": "^4.2.0",
+    "@types/chai": "^4.2.11",
+    "uglify-js": "^3.10.0"
+  },
+  "scripts": {
+    "build": "gulp build",
+    "prepublishOnly": "npm run build",
+    "test": "mocha --exit -r ts-node/register test/**/*.ts"
+  },
+  "keywords": [
+    "zation",
+    "protocol",
+    "core"
+  ]
+}
