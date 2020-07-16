@@ -610,7 +610,7 @@ export default class Communicator {
     async sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batchTimeLimit?: number): Promise<void> {
         if(batchTimeLimit) {
             return new Promise((resolve, reject) => {
-                const connectionLostListener = () => reject(new Error('Connection lost.'));
+                const connectionLostListener = () => reject(new ConnectionLostError());
                 this._connectionLostOnceListener.push(connectionLostListener);
                 const tmpAfterSend = preparedPackage._afterSend;
                 preparedPackage._afterSend = () => {
