@@ -60,16 +60,16 @@ describe('Ziron', () => {
     });
 
     it('B should receive the transmit with MixedJSON (JSON with binary).', (done) => {
-      const data = {
+      const images = {
         avatar: new ArrayBuffer(5),
         cover: new ArrayBuffer(15)
       }
       comB.onTransmit = (event,data) => {
         expect(event).to.be.equal('mixedJSONBinary');
-        expect(data).to.be.deep.equal(data);
+        expect(data).to.be.deep.equal(images);
         done();
       };
-      comA.transmit('mixedJSONBinary',new MixedJSON(data));
+      comA.transmit('mixedJSONBinary',new MixedJSON(images));
     });
 
     it('B should receive the streamed json transmit data fully.', (done) => {
@@ -299,7 +299,7 @@ describe('Ziron', () => {
       });
     });
 
-    it('A should receive the err response of invoke.', (done) => {
+    it('A should receive the err response of an invoke.', (done) => {
       const error = new Error('Some msg');
       error.name = 'SomeName';
       comB.onInvoke = (event,data,end,reject) => {
@@ -319,15 +319,6 @@ describe('Ziron', () => {
         expect(err).to.be.instanceof(TimeoutError)
         done();
       });
-    });
-
-    it('A should receive a connection lost error by an invoke with connection lost.', (done) => {
-      comB.onInvoke = () => {};
-      comA.invoke('?').catch(err => {
-        expect(err).to.be.instanceof(ConnectionLostError)
-        done();
-      });
-      comA.emitConnectionLost();
     });
 
     it('A should receive a connection lost error by an invoke with connection lost.', (done) => {
