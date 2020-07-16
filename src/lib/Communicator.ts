@@ -36,7 +36,7 @@ type PreparedPackage = (string | ArrayBuffer)[] & {
     _afterSend?: () => void;
     /**
      * @description
-     * Used to add callId on invokes.
+     * Used for sends with promises.
      * @internal
      */
     _beforeSend?: () => void;
