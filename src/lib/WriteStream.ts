@@ -89,4 +89,11 @@ export default class WriteStream {
         this.onClose(code);
         this._closePromiseResolve();
     }
+
+    /**
+     * @internal
+     */
+    public toJSON() {
+        return '[WriteStream]';
+    }
 }

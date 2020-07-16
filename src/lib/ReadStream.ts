@@ -131,4 +131,11 @@ export default class ReadStream {
         this.onClose(code);
         this._closedPromiseResolve();
     }
+
+    /**
+     * @internal
+     */
+    public toJSON() {
+        return '[ReadStream]';
+    }
 }
