@@ -163,17 +163,17 @@ export default class Communicator {
 
     private _getNewBinaryPlaceholderId() {
         if(this._binaryPlaceHolderId > Number.MAX_SAFE_INTEGER) this._binaryPlaceHolderId = 0;
-        return ++this._binaryPlaceHolderId;
+        return this._binaryPlaceHolderId++;
     }
 
     private _getNewCid(): number {
         if(this._cid > Number.MAX_SAFE_INTEGER) this._cid = 0;
-        return ++this._cid;
+        return this._cid++;
     }
 
     private _getNewStreamId(): number {
         if(this._streamId > Number.MAX_SAFE_INTEGER) this._streamId = 0;
-        return ++this._streamId;
+        return this._streamId++;
     }
 
     private _processBinaryPacket(buffer: ArrayBuffer) {
