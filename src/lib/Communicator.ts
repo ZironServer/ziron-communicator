@@ -109,7 +109,7 @@ export default class Communicator {
 
     private _connectionLostOnceListener: (() => void)[] = [];
 
-    onMessage(rawMsg: string | ArrayBuffer) {
+    emitMessage(rawMsg: string | ArrayBuffer) {
         try {
             if(typeof rawMsg !== "string"){
                 if(rawMsg.byteLength === 1 && (new Uint8Array(rawMsg))[0] === PING) {
@@ -140,7 +140,7 @@ export default class Communicator {
         catch(e){this.onInvalidMessage(e);}
     }
 
-    onConnectionLost() {
+    emitConnectionLost() {
         this._clearBinaryResolver();
         this._rejectInvokeRespPromises(new ConnectionLostError());
         this._connectionLostToStreams();
