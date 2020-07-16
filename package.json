@@ -27,6 +27,7 @@
     "gulp-terser": "1.2.0",
     "gulp-typescript": "^5.0.1",
     "del": "^5.1.0",
+    "nyc": "^15.1.0",
     "ts-node": "^8.0.3",
     "mocha": "7.0.1",
     "@types/mocha": "^7.0.2",
@@ -37,7 +38,7 @@
   "scripts": {
     "build": "gulp build",
     "prepublishOnly": "npm run build",
-    "test": "mocha --exit -r ts-node/register test/**/*.ts"
+    "test": "nyc --reporter=html --reporter=text mocha --exit -r ts-node/register test/**/*.ts"
   },
   "keywords": [
     "zation",
