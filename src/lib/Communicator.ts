@@ -51,6 +51,12 @@ const PING_BINARY = new Uint8Array([PING]);
 
 export default class Communicator {
 
+    /**
+     * The read stream class that is used.
+     * Must inherit from the Ziron ReadStream.
+     */
+    public static readStream: typeof ReadStream = ReadStream;
+
     public static binaryResolveTimeout: number = 10000;
     public static ackTimeout: number = 10000;
     public static packetBinaryResolverLimit: number = 40;
@@ -333,7 +339,7 @@ export default class Communicator {
             });
         } else if(type === DataType.Stream && Communicator.streamsEnabled) {
             if(typeof data !== 'number') return this.onInvalidMessage(new Error('StreamId is not a number.'));
-            return new ReadStream(data,this);
+            return new Communicator.readStream(data,this);
         }
         else return this.onInvalidMessage(new Error('Invalid data type.'));
     }
@@ -370,7 +376,7 @@ export default class Communicator {
                     }));
                 }
                 else if(typeof value['__stream__'] === 'number' && Communicator.streamsEnabled){
-                    obj[key] = new ReadStream(value['__stream__'],this);
+                    obj[key] = new Communicator.readStream(value['__stream__'],this);
                 }
                 else for(const key in value) this._resolveMixedJSONDeep(value, key, binaryResolverPromises);
             }
