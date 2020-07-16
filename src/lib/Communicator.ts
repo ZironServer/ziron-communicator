@@ -382,7 +382,7 @@ export default class Communicator {
         packetBuffer[0] = PacketType.BinaryReference;
         packetBuffer.set(new Uint8Array((new Float64Array([id])).buffer),1);
         packetBuffer.set(new Uint8Array(binary),9);
-        return packetBuffer;
+        return packetBuffer.buffer;
     }
 
     private _processMixedJSONDeep(data: any, binaryReferencePackets: any[], streamClosed: Promise<void>[]) {
@@ -732,7 +732,7 @@ export default class Communicator {
         packetBuffer[0] = PacketType.StreamChunk;
         packetBuffer.set(new Uint8Array((new Float64Array([streamId])).buffer),1);
         packetBuffer.set(new Uint8Array(binary),9);
-        return packetBuffer;
+        return packetBuffer.buffer;
     }
 
     /**
@@ -799,6 +799,6 @@ export default class Communicator {
         packetBuffer.set(new Uint8Array((new Float64Array([streamId])).buffer),1);
         packetBuffer.set(new Uint8Array((new Float64Array([code])).buffer),9)
         packetBuffer.set(new Uint8Array(binary),17);
-        return packetBuffer;
+        return packetBuffer.buffer;
     }
 }
