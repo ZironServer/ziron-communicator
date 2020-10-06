@@ -406,11 +406,14 @@ export default class Communicator {
                 binaryReferencePackets.push(Communicator._createBinaryReferencePacket(placeholderId, data));
                 return {__binary__: placeholderId};
             }
-            else if(data instanceof WriteStream && Communicator.streamsEnabled){
-                const streamId = this._getNewStreamId();
-                data._init(this,streamId);
-                streamClosed.push(data.closed);
-                return  {__stream__: streamId}
+            else if(data instanceof WriteStream){
+                if(Communicator.streamsEnabled){
+                    const streamId = this._getNewStreamId();
+                    data._init(this,streamId);
+                    streamClosed.push(data.closed);
+                    return  {__stream__: streamId}
+                }
+                else return data.toJSON();
             }
             else if(Array.isArray(data)) {
                 const newArray: any[] = [];
