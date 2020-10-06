@@ -4,7 +4,7 @@ GitHub: LucaCode
 Copyright(c) Luca Scaringella
  */
 
-import {Writeable} from "./Utils";
+import {Writable} from "./Utils";
 import {StreamCloseCode} from "./StreamCloseCode";
 import {StreamState} from "./StreamState";
 import Communicator from "./Communicator";
@@ -40,7 +40,7 @@ export default class ReadStream {
 
     accept(receiveTimeout: number | null = 5000) {
         if(this.state !== StreamState.Pending) return;
-        (this as Writeable<ReadStream>).state = StreamState.Open;
+        (this as Writable<ReadStream>).state = StreamState.Open;
         this.communicator._sendStreamAccept(this.id);
         if(receiveTimeout != null) this.setReceiveTimeout(receiveTimeout);
     }
@@ -124,7 +124,7 @@ export default class ReadStream {
      */
     _close(code: StreamCloseCode | number, rmFromCommunicator: boolean = true) {
         if(this.state === StreamState.Closed) return;
-        (this as Writeable<ReadStream>).state = StreamState.Closed;
+        (this as Writable<ReadStream>).state = StreamState.Closed;
         this._chainClosed = true;
         if(this._receiveTimeoutActive) clearTimeout(this._receiveTimeoutTick);
         if(rmFromCommunicator) this.communicator._removeReadStream(this.id);

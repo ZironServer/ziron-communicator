@@ -8,7 +8,7 @@ import Communicator from "./Communicator";
 import {PacketType} from "./Protocol";
 import {StreamCloseCode} from "./StreamCloseCode";
 import {StreamState} from "./StreamState";
-import {Writeable} from "./Utils";
+import {Writable} from "./Utils";
 
 export default class WriteStream {
 
@@ -35,7 +35,7 @@ export default class WriteStream {
         if(this.state !== StreamState.Unused) throw new Error('Write-stream already used.');
         this._communicator = communicator;
         this._id = id;
-        (this as Writeable<WriteStream>).state = StreamState.Pending;
+        (this as Writable<WriteStream>).state = StreamState.Pending;
         this._communicator._addWriteStream(id,this);
         this._acceptTimeoutTicker = setTimeout(() => this.close(StreamCloseCode.AcceptTimeout),
             WriteStream.acceptTimeout);
@@ -47,7 +47,7 @@ export default class WriteStream {
      */
     _open() {
         clearTimeout(this._acceptTimeoutTicker);
-        (this as Writeable<WriteStream>).state = StreamState.Open;
+        (this as Writable<WriteStream>).state = StreamState.Open;
         this.onOpen();
     }
 
@@ -58,7 +58,7 @@ export default class WriteStream {
 
     writeAndClose(data: any, processComplexTypes?: boolean, code: StreamCloseCode | number = 200) {
         if(this.state !== StreamState.Open) return;
-        (this as Writeable<WriteStream>).state = StreamState.Closed;
+        (this as Writable<WriteStream>).state = StreamState.Closed;
         this._communicator._sendWriteStreamClose(this._id,code,data,processComplexTypes);
         clearTimeout(this._acceptTimeoutTicker);
         this._communicator._removeWriteStream(this._id);
@@ -71,7 +71,7 @@ export default class WriteStream {
      */
     _connectionLost() {
         if(this.state === StreamState.Closed) return;
-        (this as Writeable<WriteStream>).state = StreamState.Closed;
+        (this as Writable<WriteStream>).state = StreamState.Closed;
         clearTimeout(this._acceptTimeoutTicker);
         this.onClose(StreamCloseCode.ConnectionLost);
         this._closePromiseResolve();
@@ -80,7 +80,7 @@ export default class WriteStream {
     close(code: StreamCloseCode | number = 200) {
         if(this.state === StreamState.Closed) return;
         const prevState = this.state;
-        (this as Writeable<WriteStream>).state = StreamState.Closed;
+        (this as Writable<WriteStream>).state = StreamState.Closed;
         if(prevState !== StreamState.Unused) {
             clearTimeout(this._acceptTimeoutTicker);
             this._communicator._sendWriteStreamClose(this._id,code);
