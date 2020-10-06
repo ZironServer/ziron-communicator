@@ -19,10 +19,18 @@ import ReadStream from "./ReadStream";
 import WriteStream from "./WriteStream";
 import {StreamCloseCode} from "./StreamCloseCode";
 import {TimeoutError,TimeoutType,InvalidActionError,ConnectionLostError} from "./Errors";
-import MixedJSON from "./MixedJSON";
+
+interface PreparePackageOptions {
+    /**
+     * Complex types are streams or array buffer.
+     * If you want to send such types you need to activate this option.
+     * Otherwise, these types will be ignored because of performance reasons.
+     */
+    processComplexTypes?: boolean
+}
 
 type TransmitListener = (event: any, data: any) => void | Promise<void>;
-type InvokeListener = (event: any, data: any, end: (data?: any) => void, reject: (err?: any) => void) => void | Promise<void>
+type InvokeListener = (event: any, data: any, end: (data?: any, processComplexTypes?: boolean) => void, reject: (err?: any) => void) => void | Promise<void>
 
 /**
  * A prepared package contains prepared or multiple packets.
@@ -277,10 +285,10 @@ export default class Communicator {
 
     private _processInvoke(caller: InvokeListener, event: any, callId: number, data: any) {
         let called;
-        caller(event, data,(data) => {
+        caller(event, data,(data, processComplexTypes) => {
             if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
             called = true;
-            this._sendInvokeDataResp(callId, data);
+            this._sendInvokeDataResp(callId, data, processComplexTypes);
         }, (err) => {
             if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
             called = true;
@@ -290,8 +298,12 @@ export default class Communicator {
         });
     }
 
-    private _sendInvokeDataResp(callId: number, data: any) {
-        if(data instanceof WriteStream && Communicator.streamsEnabled){
+    private _sendInvokeDataResp(callId: number, data: any, processComplexTypes?: boolean) {
+        if(!processComplexTypes) {
+            this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
+                DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
+        }
+        else if(data instanceof WriteStream && Communicator.streamsEnabled){
             const streamId = this._getNewStreamId();
             this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.Stream + ',' + streamId);
@@ -303,7 +315,7 @@ export default class Communicator {
                 DataType.Binary + ',' + binaryId);
             this.send(Communicator._createBinaryReferencePacket(binaryId,data));
         }
-        else if(data instanceof MixedJSON){
+        else {
             const packets: (string | ArrayBuffer)[] = [];
             const streams: any[] = [];
             packets.length = 1;
@@ -317,10 +329,6 @@ export default class Communicator {
                 this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
                     DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
             }
-        }
-        else {
-            this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
-                DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
     }
 
@@ -515,8 +523,12 @@ export default class Communicator {
      * @param event
      * @param data
      */
-    prepareTransmit(event: string, data?: any): PreparedPackage {
-        if(data instanceof WriteStream && Communicator.streamsEnabled){
+    prepareTransmit(event: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
+        if(!processComplexTypes) {
+            return [PacketType.Transmit + ',"' + event + '",' +
+            DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
+        }
+        else if(data instanceof WriteStream && Communicator.streamsEnabled){
             const streamId = this._getNewStreamId();
             const packet: PreparedPackage = [PacketType.Transmit + ',"' + event + '",' +
                 DataType.Stream + ',' + streamId];
@@ -528,7 +540,7 @@ export default class Communicator {
             return [PacketType.Transmit + ',"' + event + '",' +
                 DataType.Binary + ',' + binaryId, Communicator._createBinaryReferencePacket(binaryId,data)];
         }
-        else if(data instanceof MixedJSON){
+        else {
             const preparedPackage: PreparedPackage = [];
             const streams: any[] = [];
             preparedPackage.length = 1;
@@ -537,10 +549,6 @@ export default class Communicator {
                     ((preparedPackage.length > 1 || streams.length > 0) ? DataType.MixedJSON : DataType.JSON) +
                     (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
-        }
-        else {
-            return [PacketType.Transmit + ',"' + event + '",' +
-            DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
     }
 
@@ -554,7 +562,12 @@ export default class Communicator {
      * @param data
      * @param ackTimeout
      */
-    prepareInvoke(event: string, data?: any, ackTimeout?: number | null): PreparedInvokePackage {
+    prepareInvoke(
+        event: string,
+        data?: any,
+        {ackTimeout,processComplexTypes}: {ackTimeout?: number | null} & PreparePackageOptions = {}
+        ): PreparedInvokePackage
+    {
         const callId = this._getNewCid();
         const preparedPackage: PreparedInvokePackage = [] as any;
 
@@ -571,7 +584,13 @@ export default class Communicator {
             }
         });
 
-        if(data instanceof WriteStream && Communicator.streamsEnabled){
+        if(!processComplexTypes) {
+            preparedPackage._beforeSend = setResponseTimeout;
+            preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
+                DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '');
+            return preparedPackage;
+        }
+        else if(data instanceof WriteStream && Communicator.streamsEnabled){
             const streamId = this._getNewStreamId();
             preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
                 DataType.Stream + ',' + streamId;
@@ -587,21 +606,15 @@ export default class Communicator {
             preparedPackage[1] = Communicator._createBinaryReferencePacket(binaryId,data);
             return preparedPackage;
         }
-        else if(data instanceof MixedJSON){
+        else {
             preparedPackage.length = 1;
             const streams = [];
-            data = this._processMixedJSONDeep(data.data,preparedPackage,streams);
+            data = this._processMixedJSONDeep(data,preparedPackage,streams);
             if(streams.length > 0) Promise.all(streams).then(setResponseTimeout)
             else preparedPackage._beforeSend = setResponseTimeout;
             preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
                 ((preparedPackage.length > 1 || streams.length > 0) ? DataType.MixedJSON : DataType.JSON) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
-            return preparedPackage;
-        }
-        else {
-            preparedPackage._beforeSend = setResponseTimeout;
-            preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
-                DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
         }
     }
@@ -633,14 +646,15 @@ export default class Communicator {
 
     // noinspection JSUnusedGlobalSymbols
     invoke(event: string, data?: any, options:
-        {ackTimeout?: number | null, batchTimeLimit?: number} = {}): Promise<any> {
-        const prePackage = this.prepareInvoke(event,data,options.ackTimeout);
+        {ackTimeout?: number | null, batchTimeLimit?: number} & PreparePackageOptions = {}): Promise<any>
+    {
+        const prePackage = this.prepareInvoke(event,data,options);
         this.sendPreparedPackage(prePackage,options.batchTimeLimit);
         return prePackage.promise;
     }
 
     // noinspection JSUnusedGlobalSymbols
-    transmit(event: string, data?: any, options: {batchTimeLimit?: number} = {}) {
+    transmit(event: string, data?: any, options: {batchTimeLimit?: number} & PreparePackageOptions = {}) {
         this.sendPreparedPackage(this.prepareTransmit(event,data),options.batchTimeLimit);
     }
 
@@ -704,15 +718,19 @@ export default class Communicator {
      * @param data
      * @private
      */
-    _sendStreamChunk(streamId: number, data: any) {
-        if(Communicator.allowStreamAsChunk && data instanceof WriteStream){
+    _sendStreamChunk(streamId: number, data: any, processComplexTypes?: boolean) {
+        if(!processComplexTypes) {
+            this.send(PacketType.StreamChunk + ',' + streamId + ',' +
+                DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
+        }
+        else if(Communicator.allowStreamAsChunk && data instanceof WriteStream){
             const streamId = this._getNewStreamId();
             this.send(PacketType.StreamChunk + ',' + streamId + ',' +
                 DataType.Stream + ',' + streamId);
             data._init(this,streamId);
         }
         else if(data instanceof ArrayBuffer) this.send(Communicator._createBinaryStreamChunkPacket(streamId,data));
-        else if(data instanceof MixedJSON){
+        else {
             const packets: (string | ArrayBuffer)[] = [];
             const streams: any[] = [];
             packets.length = 1;
@@ -726,10 +744,6 @@ export default class Communicator {
                 this.send(PacketType.StreamChunk + ',' + streamId + ',' +
                     DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
             }
-        }
-        else {
-            this.send(PacketType.StreamChunk + ',' + streamId + ',' +
-                DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
     }
 
@@ -767,17 +781,21 @@ export default class Communicator {
      * @param complexData
      * @private
      */
-    _sendWriteStreamClose(streamId: number, code: number, data?: any) {
+    _sendWriteStreamClose(streamId: number, code: number, data?: any, processComplexTypes?: boolean) {
         if(data === undefined) return this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code);
         else {
-            if(Communicator.allowStreamAsChunk && data instanceof WriteStream){
+            if(!processComplexTypes) {
+                this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
+                    DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
+            }
+            else if(Communicator.allowStreamAsChunk && data instanceof WriteStream){
                 const streamId = this._getNewStreamId();
                 this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
                     DataType.Stream + ',' + streamId);
                 data._init(this,streamId);
             }
             else if(data instanceof ArrayBuffer) this.send(Communicator._createBinaryWriteStreamClosePacket(streamId, code, data));
-            else if(data instanceof MixedJSON){
+            else {
                 const packets: (string | ArrayBuffer)[] = [];
                 const streams: any[] = [];
                 packets.length = 1;
@@ -791,10 +809,6 @@ export default class Communicator {
                     this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
                         DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
                 }
-            }
-            else {
-                this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
-                    DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
             }
         }
     }

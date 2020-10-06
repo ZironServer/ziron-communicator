@@ -51,15 +51,15 @@ export default class WriteStream {
         this.onOpen();
     }
 
-    write(data: any) {
+    write(data: any, processComplexTypes?: boolean) {
         if(this.state !== StreamState.Open) return;
-        this._communicator._sendStreamChunk(this._id,data);
+        this._communicator._sendStreamChunk(this._id,data,processComplexTypes);
     }
 
-    writeAndClose(data: any, code: StreamCloseCode | number = 200) {
+    writeAndClose(data: any, processComplexTypes?: boolean, code: StreamCloseCode | number = 200) {
         if(this.state !== StreamState.Open) return;
         (this as Writeable<WriteStream>).state = StreamState.Closed;
-        this._communicator._sendWriteStreamClose(this._id,code,data);
+        this._communicator._sendWriteStreamClose(this._id,code,data,processComplexTypes);
         clearTimeout(this._acceptTimeoutTicker);
         this._communicator._removeWriteStream(this._id);
         this.onClose(code);

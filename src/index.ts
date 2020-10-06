@@ -10,13 +10,11 @@ import Communicator from "./lib/Communicator";
 import ReadStream from "./lib/ReadStream";
 import {StreamCloseCode} from "./lib/StreamCloseCode";
 import {StreamState} from "./lib/StreamState";
-import MixedJSON from "./lib/MixedJSON";
 import {TimeoutError,TimeoutType,InvalidActionError,ConnectionLostError} from "./lib/Errors";
 
 export {
     Communicator,
     JSONString,
-    MixedJSON,
     WriteStream,
     ReadStream,
     StreamCloseCode,
