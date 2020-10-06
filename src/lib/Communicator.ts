@@ -18,6 +18,7 @@ import {decodeJson, encodeJson, JSONString} from "./JsonUtils";
 import ReadStream from "./ReadStream";
 import WriteStream from "./WriteStream";
 import {StreamCloseCode} from "./StreamCloseCode";
+import {Writable} from "./Utils";
 import {TimeoutError,TimeoutType,InvalidActionError,ConnectionLostError} from "./Errors";
 
 interface PreparePackageOptions {
@@ -77,6 +78,8 @@ export default class Communicator {
     public onInvoke: InvokeListener;
     public onPing: () => void;
     public send: (msg: string | ArrayBuffer) => void;
+
+    public readonly connectionLostStamp: number = -1;
 
     constructor(connector: {
         onInvalidMessage?: (err: Error) => void;
@@ -155,6 +158,7 @@ export default class Communicator {
     }
 
     emitConnectionLost() {
+        (this as Writable<Communicator>).connectionLostStamp = Date.now();
         this._clearBinaryResolver();
         this._rejectInvokeRespPromises(new ConnectionLostError());
         this._connectionLostToStreams();

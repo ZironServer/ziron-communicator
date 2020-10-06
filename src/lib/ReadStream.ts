@@ -13,8 +13,10 @@ export default class ReadStream {
 
     public readonly state: StreamState = StreamState.Pending;
 
-    private _chainClosed: boolean = false
-    private _chain: Promise<any> = Promise.resolve();
+    private _chainClosed: boolean;
+    private _chain: Promise<any>;
+
+    private readonly _createdConnectionLostStamp: number;
 
     private _receiveTimeoutActive: boolean;
     private _receiveTimeout: number;
@@ -35,11 +37,22 @@ export default class ReadStream {
     public readonly closed: Promise<void> = new Promise(resolve => this._closedPromiseResolve = resolve);
 
     constructor(private readonly id: number, private readonly communicator: Communicator) {
-        communicator._addReadStream(id,this);
+        this._createdConnectionLostStamp = communicator.connectionLostStamp;
     }
 
     accept(receiveTimeout: number | null = 5000) {
         if(this.state !== StreamState.Pending) return;
+
+        if(this._createdConnectionLostStamp !== this.communicator.connectionLostStamp) {
+            //The connection was lost in-between time.
+            return this._connectionLost();
+        }
+
+        //init
+        this._chain = Promise.resolve();
+        this._chainClosed = false;
+
+        this.communicator._addReadStream(this.id,this);
         (this as Writable<ReadStream>).state = StreamState.Open;
         this.communicator._sendStreamAccept(this.id);
         if(receiveTimeout != null) this.setReceiveTimeout(receiveTimeout);
