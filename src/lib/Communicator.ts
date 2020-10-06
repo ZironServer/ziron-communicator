@@ -319,7 +319,7 @@ export default class Communicator {
             const packets: (string | ArrayBuffer)[] = [];
             const streams: any[] = [];
             packets.length = 1;
-            data = this._processMixedJSONDeep(data.data,packets,streams);
+            data = this._processMixedJSONDeep(data,packets,streams);
             if(packets.length > 1 || streams.length > 0){
                 packets[0] = PacketType.InvokeDataResp + ',' + callId + ',' +
                     DataType.MixedJSON + ',' + encodeJson(data);
@@ -411,7 +411,7 @@ export default class Communicator {
                     const streamId = this._getNewStreamId();
                     data._init(this,streamId);
                     streamClosed.push(data.closed);
-                    return  {__stream__: streamId}
+                    return {__stream__: streamId}
                 }
                 else return data.toJSON();
             }
@@ -547,7 +547,7 @@ export default class Communicator {
             const preparedPackage: PreparedPackage = [];
             const streams: any[] = [];
             preparedPackage.length = 1;
-            data = this._processMixedJSONDeep(data.data,preparedPackage,streams);
+            data = this._processMixedJSONDeep(data,preparedPackage,streams);
             preparedPackage[0] = PacketType.Transmit + ',"' + event + '",' +
                     ((preparedPackage.length > 1 || streams.length > 0) ? DataType.MixedJSON : DataType.JSON) +
                     (data !== undefined ? (',' + encodeJson(data)) : '');
@@ -658,7 +658,7 @@ export default class Communicator {
 
     // noinspection JSUnusedGlobalSymbols
     transmit(event: string, data?: any, options: {batchTimeLimit?: number} & PreparePackageOptions = {}) {
-        this.sendPreparedPackage(this.prepareTransmit(event,data),options.batchTimeLimit);
+        this.sendPreparedPackage(this.prepareTransmit(event,data,options),options.batchTimeLimit);
     }
 
     // noinspection JSUnusedGlobalSymbols
@@ -737,7 +737,7 @@ export default class Communicator {
             const packets: (string | ArrayBuffer)[] = [];
             const streams: any[] = [];
             packets.length = 1;
-            data = this._processMixedJSONDeep(data.data,packets,streams);
+            data = this._processMixedJSONDeep(data,packets,streams);
             if(packets.length > 1 || streams.length > 0){
                 packets[0] = PacketType.StreamChunk + ',' + streamId + ',' +
                     DataType.MixedJSON + ',' + encodeJson(data);
@@ -802,7 +802,7 @@ export default class Communicator {
                 const packets: (string | ArrayBuffer)[] = [];
                 const streams: any[] = [];
                 packets.length = 1;
-                data = this._processMixedJSONDeep(data.data,packets,streams);
+                data = this._processMixedJSONDeep(data,packets,streams);
                 if(packets.length > 1 || streams.length > 0){
                     packets[0] = PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
                         DataType.MixedJSON + ',' + encodeJson(data);
