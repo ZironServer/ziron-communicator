@@ -1,13 +1,13 @@
-import {Communicator,JSONString,MixedJSON,WriteStream,ReadStream,TimeoutError,ConnectionLostError,StreamCloseCode} from './../src/index';
+import {Communicator,JSONString,WriteStream,ReadStream,TimeoutError,ConnectionLostError,StreamCloseCode} from './../src/index';
 import {expect} from 'chai';
 
 const comA = new Communicator({
   onInvalidMessage: (err) => console.error('A: Invalid meessage: ', err),
-  onPacketProcessError: (err) => console.error('A: Packet process err: ', err),
+  onListenerError: (err) => console.error('A: Listener err: ', err),
 });
 const comB = new Communicator({
   onInvalidMessage: (err) => console.error('B: Invalid meessage: ', err),
-  onPacketProcessError: (err) => console.error('B: Packet process err: ', err),
+  onListenerError: (err) => console.error('B: Listener err: ', err),
 });
 
 //connect
@@ -69,7 +69,7 @@ describe('Ziron', () => {
         expect(data).to.be.deep.equal(images);
         done();
       };
-      comA.transmit('mixedJSONBinary',new MixedJSON(images));
+      comA.transmit('mixedJSONBinary',images,{processComplexTypes: true});
     });
 
     it('B should receive the streamed json transmit data fully.', (done) => {
@@ -81,7 +81,7 @@ describe('Ziron', () => {
           writeStream.write(i);
         }
         writtenData.push(500);
-        writeStream.writeAndClose(500,200);
+        writeStream.writeAndClose(500,false,200);
       };
       comB.onTransmit = (event,data: ReadStream) => {
         expect(event).to.be.equal('streamJson');
@@ -97,7 +97,7 @@ describe('Ziron', () => {
         };
         data.accept();
       };
-      comA.transmit('streamJson',writeStream);
+      comA.transmit('streamJson',writeStream,{processComplexTypes: true});
     });
 
     it('B should receive the streamed binary transmit data fully.', (done) => {
@@ -107,7 +107,7 @@ describe('Ziron', () => {
         for(let i = 0; i < 100; i++) {
           const binary = new ArrayBuffer(i);
           writtenData.push(binary);
-          writeStream.write(binary);
+          writeStream.write(binary,true);
         }
         writeStream.close(200);
       };
@@ -125,7 +125,7 @@ describe('Ziron', () => {
         };
         data.accept();
       };
-      comA.transmit('streamBinary',writeStream);
+      comA.transmit('streamBinary',writeStream,{processComplexTypes: true});
     });
 
     it("A's write stream should be closed when B closes the read stream.", (done) => {
@@ -139,7 +139,7 @@ describe('Ziron', () => {
         expect(data).to.be.instanceof(ReadStream);
         data.close(505)
       };
-      comA.transmit('readStreamClose',writeStream);
+      comA.transmit('readStreamClose',writeStream,{processComplexTypes: true});
     });
 
     it("Ignored read stream should end write stream with an accept timeout.", (done) => {
@@ -152,7 +152,7 @@ describe('Ziron', () => {
       comB.onTransmit = (event,data: ReadStream) => {
         expect(event).to.be.equal('streamAcceptTimeout');
       };
-      comA.transmit('streamAcceptTimeout',writeStream);
+      comA.transmit('streamAcceptTimeout',writeStream,{processComplexTypes: true});
     });
 
 
@@ -169,7 +169,7 @@ describe('Ziron', () => {
         data.accept(60);
 
       };
-      comA.transmit('streamReceiveTimeout',writeStream);
+      comA.transmit('streamReceiveTimeout',writeStream,{processComplexTypes: true});
     });
 
     it('All batch transmits should be received.', (done) => {
@@ -208,7 +208,7 @@ describe('Ziron', () => {
       const binary = new ArrayBuffer(200);
       comB.onInvoke = (event,data,end) => {
         expect(event).to.be.equal('getBinary');
-        end(binary);
+        end(binary,true);
       };
       comA.invoke('getBinary').then(result => {
         expect(result).to.be.deep.equal(binary);
@@ -220,9 +220,9 @@ describe('Ziron', () => {
       const binary = new ArrayBuffer(200);
       comB.onInvoke = (event,data,end) => {
         expect(event).to.be.equal('getSameBinary');
-        end(data);
+        end(data,true);
       };
-      comA.invoke('getSameBinary',binary).then(result => {
+      comA.invoke('getSameBinary',binary,{processComplexTypes: true}).then(result => {
         expect(result).to.be.deep.equal(binary);
         done();
       });
@@ -235,8 +235,8 @@ describe('Ziron', () => {
         const chunk1 = new ArrayBuffer(20);
         const chunk2 = new ArrayBuffer(25);
         writtenCode = [chunk1,chunk2];
-        writeStream.write(chunk1);
-        writeStream.writeAndClose(chunk2,200);
+        writeStream.write(chunk1,true);
+        writeStream.writeAndClose(chunk2,true,200);
       };
 
       const car = {avatar: new ArrayBuffer(20), model: 'X1', hp: 500, code: writeStream};
@@ -258,7 +258,7 @@ describe('Ziron', () => {
         }
         codeReadStream.accept();
       };
-      comA.invoke('car',new MixedJSON(car)).then(result => {
+      comA.invoke('car',car,{processComplexTypes: true}).then(result => {
         expect(result).to.be.equal(1);
         done();
       });
@@ -275,12 +275,12 @@ describe('Ziron', () => {
           const chunk1 = new ArrayBuffer(20);
           const chunk2 = new ArrayBuffer(25);
           writtenCode = [chunk1,chunk2];
-          writeStream.write(chunk1);
-          writeStream.writeAndClose(chunk2,200);
+          writeStream.write(chunk1,true);
+          writeStream.writeAndClose(chunk2,true,200);
         };
 
         tv = {avatar: new ArrayBuffer(20), model: 'Y1', code: writeStream};
-        end(new MixedJSON(tv));
+        end(tv,true);
       };
       comA.invoke('tv').then(result => {
         expect(result.avatar).to.be.deep.equal(tv.avatar);
