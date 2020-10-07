@@ -66,6 +66,7 @@ export default class Communicator {
     public static binaryResolveTimeout: number = 10000;
     public static ackTimeout: number = 10000;
     public static packetBinaryResolverLimit: number = 40;
+    public static packetStreamLimit: number = 20;
     public static streamsEnabled: boolean = true;
     public static allowStreamAsChunk: boolean = false;
 
@@ -390,7 +391,8 @@ export default class Communicator {
     }
 
     private _resolveMixedJSONDeep(obj: any, key: any, binaryResolverPromises: Promise<any>[],
-                                  options: {parseStreams: boolean, parseBinaries: boolean}): any
+                                  options: {parseStreams: boolean, parseBinaries: boolean}, 
+                                  meta: {streamCount:  number} = {streamCount: 0}): any
     {
         const value = obj[key];
         if(typeof value === 'object' && value) {
@@ -409,6 +411,9 @@ export default class Communicator {
                     }));
                 }
                 else if(options.parseStreams && typeof value['__stream__'] === 'number'){
+                    if(meta.streamCount >= Communicator.packetStreamLimit)
+                        throw new Error('Max stream limit reached.')
+                    meta.streamCount++;    
                     obj[key] = new Communicator.readStream(value['__stream__'],this);
                 }
                 else for(const key in value) this._resolveMixedJSONDeep(value, key, binaryResolverPromises, options);
