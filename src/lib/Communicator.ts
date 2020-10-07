@@ -107,6 +107,8 @@ export default class Communicator {
     private _binaryPlaceHolderId: number = 0;
     private _binaryResolver: Record<number,{resolve: (binary: ArrayBuffer) => void,reject: (err: any) => void,timeout: NodeJS.Timeout}> = {};
 
+    private static _binaryMultiPlaceHolderId: number = -1;
+
     /**
      * Can not be reset on connection lost
      * because prepared packets with old ids can exist.
@@ -190,6 +192,11 @@ export default class Communicator {
     private _getNewBinaryPlaceholderId() {
         if(this._binaryPlaceHolderId > Number.MAX_SAFE_INTEGER) this._binaryPlaceHolderId = 0;
         return this._binaryPlaceHolderId++;
+    }
+
+    private static _getNewBinaryMultiPlaceholderId() {
+        if(Communicator._binaryMultiPlaceHolderId < Number.MIN_SAFE_INTEGER) Communicator._binaryMultiPlaceHolderId = -1;
+        return Communicator._binaryMultiPlaceHolderId--;
     }
 
     private _getNewCid(): number {
@@ -548,7 +555,8 @@ export default class Communicator {
     }
 
     /**
-     * Notice that prepared packages can not send multiple times.
+     * Notice that the prepared package can not send multiple times. 
+     * If you need this you can check out the static method prepareMultiTransmit.
      * Also after preparing you should not send millions of other
      * packages before sending the prepared package.
      * It is perfect to prepare packages when the connection
@@ -586,7 +594,7 @@ export default class Communicator {
     }
 
     /**
-     * Notice that prepared packages can not send multiple times.
+     * Notice that the prepared package can not send multiple times.
      * Also after preparing you should not send millions of other
      * packages before sending the prepared package.
      * It is perfect to prepare packages when the connection
@@ -845,5 +853,62 @@ export default class Communicator {
         packetBuffer.set(new Uint8Array((new Float64Array([code])).buffer),9)
         packetBuffer.set(new Uint8Array(binary),17);
         return packetBuffer.buffer;
+    }
+
+    /**
+     * @description
+     * Creates a prepared transmit package that can be sent to multiple communicators. 
+     * This is extremely efficient when sending to a lot of communicators. 
+     * Notice that streams are not supported but binaries are supported. 
+     * After preparing you should not wait a long time to send the package to the targets.
+     * @param event 
+     * @param data 
+     */
+    public static prepareMultiTransmit(event: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
+        if(!processComplexTypes) {
+            return [PacketType.Transmit + ',"' + event + '",' +
+            DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
+        }
+        else if(data instanceof ArrayBuffer) {
+            const binaryId = Communicator._getNewBinaryMultiPlaceholderId();
+            return [PacketType.Transmit + ',"' + event + '",' +
+                DataType.Binary + ',' + binaryId, Communicator._createBinaryReferencePacket(binaryId,data)];
+        }
+        else {
+            const preparedPackage: PreparedPackage = [];
+            preparedPackage.length = 1;
+            data = Communicator._processMultiMixedJSONDeep(data,preparedPackage);
+            preparedPackage[0] = PacketType.Transmit + ',"' + event + '",' +
+                parseJSONDataType(preparedPackage.length > 1,false) +
+                (data !== undefined ? (',' + encodeJson(data)) : '');
+            return preparedPackage;
+        }
+    }
+
+    private static _processMultiMixedJSONDeep(data: any, binaryReferencePackets: any[]) {
+        if(typeof data === 'object' && data){
+            if(data instanceof ArrayBuffer){
+                const placeholderId = Communicator._getNewBinaryMultiPlaceholderId();
+                binaryReferencePackets.push(Communicator._createBinaryReferencePacket(placeholderId, data));
+                return {__binary__: placeholderId};
+            }
+            else if(Array.isArray(data)) {
+                const newArray: any[] = [];
+                const len = data.length;
+                for (let i = 0; i < len; i++) {
+                    newArray[i] = Communicator._processMultiMixedJSONDeep(data[i], binaryReferencePackets);
+                }
+                return newArray;
+            }
+            else if(!(data instanceof Date)) {
+                const clone = {};
+                for(const key in data) {
+                    // noinspection JSUnfilteredForInLoop
+                    clone[key] = Communicator._processMultiMixedJSONDeep(data[key], binaryReferencePackets);
+                }
+                return clone;
+            }
+        }
+        return data;
     }
 }
