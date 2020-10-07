@@ -42,6 +42,8 @@ export default class ReadStream {
     private _closedPromiseResolve: () => void;
     public readonly closed: Promise<void> = new Promise(resolve => this._closedPromiseResolve = resolve);
 
+    public readonly closedCode?: StreamCloseCode | number;
+
     constructor(private readonly id: number, private readonly communicator: Communicator) {
         this._createdConnectionLostStamp = communicator.connectionLostStamp;
     }
@@ -151,6 +153,7 @@ export default class ReadStream {
     _close(code: StreamCloseCode | number, rmFromCommunicator: boolean = true) {
         if(this.state === StreamState.Closed) return;
         (this as Writable<ReadStream>).state = StreamState.Closed;
+        (this as Writable<ReadStream>).closedCode = code;
         this._chainClosed = true;
         if(this._receiveTimeoutActive) clearTimeout(this._receiveTimeoutTick);
         if(rmFromCommunicator) this.communicator._removeReadStream(this.id);
