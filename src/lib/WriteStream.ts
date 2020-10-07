@@ -5,7 +5,6 @@ Copyright(c) Luca Scaringella
  */
 
 import Communicator from "./Communicator";
-import {PacketType} from "./Protocol";
 import {StreamCloseCode} from "./StreamCloseCode";
 import {StreamState} from "./StreamState";
 import {Writable} from "./Utils";
@@ -18,6 +17,12 @@ export default class WriteStream {
 
     public onOpen: () => void | Promise<any> = () => {};
     public onClose: (code: StreamCloseCode | number) => void | Promise<any> = () => {};
+     /**
+     * @description
+     * Is called whenever one of the listeners
+     * (onOpen,onClose) have thrown an error.
+     */
+    public onListenerError?: (err: Error) => void;
 
     private _closePromiseResolve: () => void;
     public readonly closed: Promise<void> = new Promise(resolve => this._closePromiseResolve = resolve);
@@ -48,7 +53,15 @@ export default class WriteStream {
     _open() {
         clearTimeout(this._acceptTimeoutTicker);
         (this as Writable<WriteStream>).state = StreamState.Open;
-        this.onOpen();
+        try {this.onOpen()}
+        catch(err) {this._onListenerError(err)} 
+    }
+
+    private _onListenerError(err: Error) {
+        if(this.onListenerError) {
+            try {this.onListenerError(err)}
+            catch(_) {}
+        }
     }
 
     write(data: any, processComplexTypes?: boolean) {
@@ -62,7 +75,8 @@ export default class WriteStream {
         this._communicator._sendWriteStreamClose(this._id,code,data,processComplexTypes);
         clearTimeout(this._acceptTimeoutTicker);
         this._communicator._removeWriteStream(this._id);
-        this.onClose(code);
+        try {this.onClose(code)}
+        catch(err) {this._onListenerError(err)}
         this._closePromiseResolve();
     }
 
@@ -73,7 +87,8 @@ export default class WriteStream {
         if(this.state === StreamState.Closed) return;
         (this as Writable<WriteStream>).state = StreamState.Closed;
         clearTimeout(this._acceptTimeoutTicker);
-        this.onClose(StreamCloseCode.ConnectionLost);
+        try {this.onClose(StreamCloseCode.ConnectionLost)}
+        catch(err) {this._onListenerError(err)}
         this._closePromiseResolve();
     }
 
@@ -86,7 +101,8 @@ export default class WriteStream {
             this._communicator._sendWriteStreamClose(this._id,code);
             this._communicator._removeWriteStream(this._id);
         }
-        this.onClose(code);
+        try {this.onClose(code)}
+        catch(err) {this._onListenerError(err)}
         this._closePromiseResolve();
     }
 

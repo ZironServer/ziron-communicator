@@ -4,6 +4,8 @@ GitHub: LucaCode
 Copyright(c) Luca Scaringella
  */
 
+import {DataType} from "./DataType";
+
 export const enum PacketType {
     Bundle,
     Transmit,
@@ -15,13 +17,6 @@ export const enum PacketType {
     WriteStreamClose,
     BinaryReference,
     InvokeErrResp
-}
-
-export const enum DataType {
-    JSON,
-    Binary,
-    Stream,
-    MixedJSON
 }
 
 /**

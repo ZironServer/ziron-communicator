@@ -7,12 +7,9 @@ Copyright(c) Luca Scaringella
 import {
     ActionPacket,
     BundlePacket,
-    DataType,
-    InvokeDataRespPacket,
-    InvokePacket,
     PacketType,
-    TransmitPacket
 } from "./Protocol";
+import {DataType, DataTypeSymbol, isMixedJSONDataType, parseJSONDataType} from "./DataType";
 import {dehydrateError, hydrateError} from "./ErrorUtils";
 import {decodeJson, encodeJson, JSONString} from "./JsonUtils";
 import ReadStream from "./ReadStream";
@@ -73,7 +70,12 @@ export default class Communicator {
     public static allowStreamAsChunk: boolean = false;
 
     public onInvalidMessage: (err: Error) => void;
-    public onPacketProcessError: (err: Error) => void;
+    /**
+     * @description
+     * Is called whenever one of the listeners
+     * (onTransmit, onInvoke, onPing) have thrown an error.
+     */
+    public onListenerError: (err: Error) => void;
     public onTransmit: TransmitListener;
     public onInvoke: InvokeListener;
     public onPing: () => void;
@@ -83,14 +85,14 @@ export default class Communicator {
 
     constructor(connector: {
         onInvalidMessage?: (err: Error) => void;
-        onPacketProcessError?: (err: Error) => void;
+        onListenerError?: (err: Error) => void;
         onTransmit?: TransmitListener;
         onInvoke?: InvokeListener;
         onPing?: () => void;
         send?: (msg: string | ArrayBuffer) => void;
     } = {}) {
         this.onInvalidMessage = connector.onInvalidMessage || (() => {});
-        this.onPacketProcessError = connector.onPacketProcessError || (() => {});
+        this.onListenerError = connector.onListenerError || (() => {});
         this.onTransmit = connector.onTransmit || (() => {});
         this.onInvoke = connector.onInvoke || (() => {});
         this.onPing = connector.onPing || (() => {});
@@ -131,7 +133,7 @@ export default class Communicator {
             if(typeof rawMsg !== "string"){
                 if(rawMsg.byteLength === 1 && (new Uint8Array(rawMsg))[0] === PING) {
                     try {this.onPing();}
-                    catch (err) {this.onPacketProcessError(err)}
+                    catch (err) {this.onListenerError(err)}
                 }
                 else this._processBinaryPacket(rawMsg);
             }
@@ -166,6 +168,11 @@ export default class Communicator {
         this._activeWriteStreams = {};
         for(let i = 0; i < this._connectionLostOnceListener.length; i++) this._connectionLostOnceListener[i]();
         this._connectionLostOnceListener = [];
+    }
+
+    private _onListenerError(err: Error) {
+        try {this.onListenerError(err);}
+        catch(_) {}
     }
 
     private _rejectInvokeRespPromises(err: Error) {
@@ -213,10 +220,15 @@ export default class Communicator {
         else this.onInvalidMessage(new Error('Unknown binary package header type.'))
     }
 
+    private _processTransmit(event: string,data: any) {
+        try {this.onTransmit(event,data)}
+        catch(err) {this._onListenerError(err)}
+    }
+
     private async _processJsonActionPacket(packet: ActionPacket) {
         switch (packet['0']) {
             case PacketType.Transmit:
-                return this.onTransmit(packet['1'],await this._processData(packet['2'],packet['3']));
+                 return this._processTransmit(packet['1'],await this._processData(packet['2'],packet['3']));
             case PacketType.Invoke:
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
                 return this._processInvoke(this.onInvoke,packet['1'],packet['2'],
@@ -289,17 +301,20 @@ export default class Communicator {
 
     private _processInvoke(caller: InvokeListener, event: any, callId: number, data: any) {
         let called;
-        caller(event, data,(data, processComplexTypes) => {
-            if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
-            called = true;
-            this._sendInvokeDataResp(callId, data, processComplexTypes);
-        }, (err) => {
-            if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
-            called = true;
-            this.send(PacketType.InvokeErrResp + ',' +
-                callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err)))
-            );
-        });
+        try {
+            caller(event, data,(data, processComplexTypes) => {
+                if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
+                called = true;
+                this._sendInvokeDataResp(callId, data, processComplexTypes);
+            }, (err) => {
+                if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
+                called = true;
+                this.send(PacketType.InvokeErrResp + ',' +
+                    callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err)))
+                );
+            });
+        }
+        catch(err) {this._onListenerError(err);}
     }
 
     private _sendInvokeDataResp(callId: number, data: any, processComplexTypes?: boolean) {
@@ -324,36 +339,40 @@ export default class Communicator {
             const streams: any[] = [];
             packets.length = 1;
             data = this._processMixedJSONDeep(data,packets,streams);
-            if(packets.length > 1 || streams.length > 0){
-                packets[0] = PacketType.InvokeDataResp + ',' + callId + ',' +
-                    DataType.MixedJSON + ',' + encodeJson(data);
-                for(let i = 0; i < packets.length; i++) this.send(packets[i])
-            }
-            else {
-                this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
-                    DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
-            }
+
+            packets[0] = PacketType.InvokeDataResp + ',' + callId + ',' +
+                parseJSONDataType(packets.length > 1, streams.length > 0) + 
+                (data !== undefined ? (',' + encodeJson(data)) : '');
+            for(let i = 0; i < packets.length; i++) this.send(packets[i])    
         }
     }
 
     private _processData(type: DataType, data: any): Promise<any> | any {
-        if (type === DataType.JSON) return data;
+        if (type === DataType.JSON) {
+            if(typeof data === 'object' && data) data[DataTypeSymbol] = DataType.JSON;
+            return data;
+        }
         else if (type === DataType.Binary) {
-            if(typeof data !== 'number') return this.onInvalidMessage(new Error('Invalid binary placeholder type.'));
+            if(typeof data !== 'number') throw new Error('Invalid binary placeholder type.');
             return this._createBinaryResolver(data);
-        } else if (type === DataType.MixedJSON) {
+        } else if (isMixedJSONDataType(type)) {
             const promises: Promise<any>[] = [];
             const wrapper = [data];
-            this._resolveMixedJSONDeep(wrapper, 0, promises);
+            this._resolveMixedJSONDeep(wrapper, 0, promises, {
+                parseStreams: Communicator.streamsEnabled &&
+                    (type === DataType.JSONWithStreams || type === DataType.JSONWithStreamsAndBinary),
+                parseBinaries: type === DataType.JSONWithBinaries || type === DataType.JSONWithStreamsAndBinary
+            });
             return new Promise(async resolve => {
                 await Promise.all(promises);
+                if(typeof wrapper[0] === 'object' && wrapper[0]) wrapper[0][DataTypeSymbol] = type;
                 resolve(wrapper[0]);
             });
         } else if(type === DataType.Stream && Communicator.streamsEnabled) {
-            if(typeof data !== 'number') return this.onInvalidMessage(new Error('StreamId is not a number.'));
+            if(typeof data !== 'number') throw new Error('StreamId is not a number.');
             return new Communicator.readStream(data,this);
         }
-        else return this.onInvalidMessage(new Error('Invalid data type.'));
+        else throw new Error('Invalid data type.');
     }
 
     private _createBinaryResolver(id: number): Promise<ArrayBuffer> {
@@ -370,15 +389,17 @@ export default class Communicator {
         });
     }
 
-    private _resolveMixedJSONDeep(obj: any, key: any, binaryResolverPromises: Promise<any>[]): any {
+    private _resolveMixedJSONDeep(obj: any, key: any, binaryResolverPromises: Promise<any>[],
+                                  options: {parseStreams: boolean, parseBinaries: boolean}): any
+    {
         const value = obj[key];
         if(typeof value === 'object' && value) {
             if(Array.isArray(value)) {
                 const len = value.length;
-                for (let i = 0; i < len; i++) this._resolveMixedJSONDeep(value, i, binaryResolverPromises);
+                for (let i = 0; i < len; i++) this._resolveMixedJSONDeep(value, i, binaryResolverPromises, options);
             }
             else  {
-                if(typeof value['__binary__'] === 'number'){
+                if(options.parseBinaries && typeof value['__binary__'] === 'number'){
                     if(binaryResolverPromises.length >= Communicator.packetBinaryResolverLimit)
                         throw new Error('Max binary resolver limit reached.')
                     binaryResolverPromises.push(new Promise(async (resolve) => {
@@ -387,10 +408,10 @@ export default class Communicator {
                         resolve();
                     }));
                 }
-                else if(typeof value['__stream__'] === 'number' && Communicator.streamsEnabled){
+                else if(options.parseStreams && typeof value['__stream__'] === 'number'){
                     obj[key] = new Communicator.readStream(value['__stream__'],this);
                 }
-                else for(const key in value) this._resolveMixedJSONDeep(value, key, binaryResolverPromises);
+                else for(const key in value) this._resolveMixedJSONDeep(value, key, binaryResolverPromises, options);
             }
         }
     }
@@ -553,8 +574,8 @@ export default class Communicator {
             preparedPackage.length = 1;
             data = this._processMixedJSONDeep(data,preparedPackage,streams);
             preparedPackage[0] = PacketType.Transmit + ',"' + event + '",' +
-                    ((preparedPackage.length > 1 || streams.length > 0) ? DataType.MixedJSON : DataType.JSON) +
-                    (data !== undefined ? (',' + encodeJson(data)) : '');
+                parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
+                (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
         }
     }
@@ -620,7 +641,7 @@ export default class Communicator {
             if(streams.length > 0) Promise.all(streams).then(setResponseTimeout)
             else preparedPackage._beforeSend = setResponseTimeout;
             preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
-                ((preparedPackage.length > 1 || streams.length > 0) ? DataType.MixedJSON : DataType.JSON) +
+                parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
         }
@@ -742,15 +763,11 @@ export default class Communicator {
             const streams: any[] = [];
             packets.length = 1;
             data = this._processMixedJSONDeep(data,packets,streams);
-            if(packets.length > 1 || streams.length > 0){
-                packets[0] = PacketType.StreamChunk + ',' + streamId + ',' +
-                    DataType.MixedJSON + ',' + encodeJson(data);
-                for(let i = 0; i < packets.length; i++) this.send(packets[i])
-            }
-            else {
-                this.send(PacketType.StreamChunk + ',' + streamId + ',' +
-                    DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
-            }
+
+            packets[0] = PacketType.StreamChunk + ',' + streamId + ',' +
+                parseJSONDataType(packets.length > 1 || streams.length > 0) + 
+                (data !== undefined ? (',' + encodeJson(data)) : '');
+            for(let i = 0; i < packets.length; i++) this.send(packets[i])
         }
     }
 
@@ -807,15 +824,11 @@ export default class Communicator {
                 const streams: any[] = [];
                 packets.length = 1;
                 data = this._processMixedJSONDeep(data,packets,streams);
-                if(packets.length > 1 || streams.length > 0){
-                    packets[0] = PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
-                        DataType.MixedJSON + ',' + encodeJson(data);
-                    for(let i = 0; i < packets.length; i++) this.send(packets[i])
-                }
-                else {
-                    this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
-                        DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
-                }
+
+                packets[0] = PacketType.WriteStreamClose + ',' + + streamId + ',' + code + ',' +
+                    parseJSONDataType(packets.length > 1 || streams.length > 0) + 
+                    (data !== undefined ? (',' + encodeJson(data)) : '');
+                for(let i = 0; i < packets.length; i++) this.send(packets[i])
             }
         }
     }

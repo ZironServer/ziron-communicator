@@ -32,6 +32,12 @@ export default class ReadStream {
      * The listener will be called when the stream has closed.
      */
     public onClose: (code: StreamCloseCode | number) => void | Promise<any> = () => {};
+     /**
+     * @description
+     * Is called whenever one of the listeners
+     * (onChunk, onClose) have thrown an error.
+     */
+    public onListenerError?: (err: Error) => void;
 
     private _closedPromiseResolve: () => void;
     public readonly closed: Promise<void> = new Promise(resolve => this._closedPromiseResolve = resolve);
@@ -91,6 +97,13 @@ export default class ReadStream {
             setTimeout(() => this._close(StreamCloseCode.ReceiveTimeout),this._receiveTimeout);
     }
 
+    private _onListenerError(err: Error) {
+        if(this.onListenerError) {
+            try {this.onListenerError(err)}
+            catch(_) {}
+        }
+    }
+
     /**
      * @internal
      */
@@ -103,14 +116,14 @@ export default class ReadStream {
 
     private async _handleChunkPromise(chunkPromise: Promise<any | ArrayBuffer>) {
         try {this._newChunk(await chunkPromise);}
-        catch (e) {
-            this.communicator.onPacketProcessError(e);
-            this._close(StreamCloseCode.ChunkResolveFailure);
-        }
+        catch (e) {this._close(StreamCloseCode.ChunkResolveFailure);}
     }
 
     private _newChunk(chunk: any | ArrayBuffer) {
-        if(this.state === StreamState.Open) this.onChunk(chunk);
+        if(this.state === StreamState.Open) {
+            try {this.onChunk(chunk);}
+            catch(err) {this._onListenerError(err);}
+        }
     }
 
     /**
@@ -141,7 +154,8 @@ export default class ReadStream {
         this._chainClosed = true;
         if(this._receiveTimeoutActive) clearTimeout(this._receiveTimeoutTick);
         if(rmFromCommunicator) this.communicator._removeReadStream(this.id);
-        this.onClose(code);
+        try {this.onClose(code);}
+        catch(err) {this._onListenerError(err)}
         this._closedPromiseResolve();
     }
 
