@@ -6,6 +6,6 @@ Invokes represent the request/response principle.
 For example, A sends something to B and expects a response back. 
 Transmits represent a simple transmit from A to B without a response from B. 
 All data that is sent in invokes or transmits can be JSON content, binary or a stream. 
-With the MixedJSON class, it is possible to have JSON content that contains binary data or streams. 
+It is even possible to have JSON data that contains binary data or streams. 
 Streams can be used to stream data in chunks from one to the other side. 
-The Ziron implementation can be used in any underlying structure that supports a bidirectional connection.
+It is possible to use the Ziron implementation in any underlying structure that supports a bidirectional connection.
