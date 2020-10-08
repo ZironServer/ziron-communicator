@@ -28,7 +28,7 @@ interface PreparePackageOptions {
 }
 
 type TransmitListener = (event: any, data: any, type: DataType) => void | Promise<void>;
-type InvokeListener = (event: any, data: any, end: (data?: any, processComplexTypes?: boolean) => void, 
+type InvokeListener = (event: any, data: any, end: (data?: any, processComplexTypes?: boolean) => void,
     reject: (err?: any) => void, type: DataType) => void | Promise<void>
 
 /**
@@ -253,8 +253,8 @@ export default class Communicator {
                 if (resp) {
                     clearTimeout(resp.timeout!);
                     delete this._invokeResponsePromises[packet['1']];
-                    return resp.resolve(resp.returnDataType ? 
-                        [await this._processData(packet['2'],packet['3']),packet['2']] : 
+                    return resp.resolve(resp.returnDataType ?
+                        [await this._processData(packet['2'],packet['3']),packet['2']] :
                         await this._processData(packet['2'],packet['3']));
                 }
                 return;
@@ -306,7 +306,7 @@ export default class Communicator {
             if(containsStreams(dataType) && !Communicator.chunksCanContainStreams)
                 throw new Error('Streams in chunks are not allowed.');
             stream._addChunkToChain(this._processData(dataType,data),dataType);
-        }       
+        }
     }
 
     private _processBinaryStreamChunk(streamId: number, binary: ArrayBuffer) {
@@ -364,9 +364,9 @@ export default class Communicator {
             data = this._processMixedJSONDeep(data,packets,streams);
 
             packets[0] = PacketType.InvokeDataResp + ',' + callId + ',' +
-                parseJSONDataType(packets.length > 1, streams.length > 0) + 
+                parseJSONDataType(packets.length > 1, streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
-            for(let i = 0; i < packets.length; i++) this.send(packets[i])    
+            for(let i = 0; i < packets.length; i++) this.send(packets[i])
         }
     }
 
@@ -409,7 +409,7 @@ export default class Communicator {
     }
 
     private _resolveMixedJSONDeep(obj: any, key: any, binaryResolverPromises: Promise<any>[],
-                                  options: {parseStreams: boolean, parseBinaries: boolean}, 
+                                  options: {parseStreams: boolean, parseBinaries: boolean},
                                   meta: {streamCount:  number} = {streamCount: 0}): any
     {
         const value = obj[key];
@@ -431,7 +431,7 @@ export default class Communicator {
                 else if(options.parseStreams && typeof value['__stream__'] === 'number'){
                     if(meta.streamCount >= Communicator.packetStreamLimit)
                         throw new Error('Max stream limit reached.')
-                    meta.streamCount++;    
+                    meta.streamCount++;
                     obj[key] = new Communicator.readStream(value['__stream__'],this);
                 }
                 else for(const key in value) this._resolveMixedJSONDeep(value, key, binaryResolverPromises, options);
@@ -566,7 +566,7 @@ export default class Communicator {
     }
 
     /**
-     * Notice that the prepared package can not send multiple times. 
+     * Notice that the prepared package can not send multiple times.
      * If you need this you can check out the static method prepareMultiTransmit.
      * Also after preparing you should not send millions of other
      * packages before sending the prepared package.
@@ -698,7 +698,7 @@ export default class Communicator {
 
     // noinspection JSUnusedGlobalSymbols
     invoke<RDT extends true | false | undefined>(event: string, data?: any, options:
-        {ackTimeout?: number | null, batchTimeLimit?: number,returnDataType?: RDT} & PreparePackageOptions = {}): 
+        {ackTimeout?: number | null, batchTimeLimit?: number,returnDataType?: RDT} & PreparePackageOptions = {}):
         Promise<RDT extends true ? [any,DataType] : any>
     {
         const prePackage = this.prepareInvoke(event,data,options);
@@ -790,7 +790,7 @@ export default class Communicator {
             data = this._processMixedJSONDeep(data,packets,streams);
 
             packets[0] = PacketType.StreamChunk + ',' + streamId + ',' +
-                parseJSONDataType(packets.length > 1 || streams.length > 0) + 
+                parseJSONDataType(packets.length > 1 || streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
             for(let i = 0; i < packets.length; i++) this.send(packets[i])
         }
@@ -851,7 +851,7 @@ export default class Communicator {
                 data = this._processMixedJSONDeep(data,packets,streams);
 
                 packets[0] = PacketType.WriteStreamClose + ',' + + streamId + ',' + code + ',' +
-                    parseJSONDataType(packets.length > 1 || streams.length > 0) + 
+                    parseJSONDataType(packets.length > 1 || streams.length > 0) +
                     (data !== undefined ? (',' + encodeJson(data)) : '');
                 for(let i = 0; i < packets.length; i++) this.send(packets[i])
             }
@@ -869,13 +869,13 @@ export default class Communicator {
 
     /**
      * @description
-     * Creates a prepared transmit package that can be sent to multiple communicators 
+     * Creates a prepared transmit package that can be sent to multiple communicators
      * but not multiple times to the same communicator (except there is no binary data in the package).
-     * This is extremely efficient when sending to a lot of communicators. 
-     * Notice that streams are not supported but binaries are supported. 
+     * This is extremely efficient when sending to a lot of communicators.
+     * Notice that streams are not supported but binaries are supported.
      * After preparing you should not wait a long time to send the package to the targets.
-     * @param event 
-     * @param data 
+     * @param event
+     * @param data
      */
     public static prepareMultiTransmit(event: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
         if(!processComplexTypes) {
