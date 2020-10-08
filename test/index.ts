@@ -648,7 +648,7 @@ describe('Ziron', () => {
       })
     });
 
-    it(`Multi used write stream should throw in error.`, () => {
+    it(`Using the same write stream multiple times should throw an error.`, () => {
       const stream = new WriteStream();
       comA1.transmit('event',stream,{processComplexTypes: true});
         
