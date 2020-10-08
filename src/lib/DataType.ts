@@ -57,8 +57,8 @@ function _analyseDataDeep(data: any, meta: {binaries?: boolean, streams?: boolea
         else if(data instanceof ReadStream || data instanceof WriteStream) meta.streams = true;
         else if(Array.isArray(data)) {
             const len = data.length;
-            for (let i = 0; i < len; i++) _analyseDataDeep(data,meta);
+            for (let i = 0; i < len; i++) _analyseDataDeep(data[i],meta);
         }
-        else for(const key in data) _analyseDataDeep(data,meta);
+        else for(const key in data) _analyseDataDeep(data[key],meta);
     }
 }
