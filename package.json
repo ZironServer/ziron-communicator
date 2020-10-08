@@ -1,7 +1,7 @@
 {
   "name": "ziron",
   "description": "The protocol implementation that Zation core and client uses.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "license": "SEE LICENSE IN <https://github.com/ZationServer/zation/wiki/Zation-End-User-License-Agreement>",
