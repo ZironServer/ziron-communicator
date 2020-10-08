@@ -32,6 +32,11 @@ export default class WriteStream {
 
     private _acceptTimeoutTicker: NodeJS.Timeout;
 
+    constructor(onOpen?: () => void | Promise<any>,onClose?: (code: StreamCloseCode | number) => void | Promise<any>) {
+        if(onOpen) this.onOpen = onOpen;
+        if(onClose) this.onClose = onClose;
+    }
+
     /**
      * @internal
      * @private
