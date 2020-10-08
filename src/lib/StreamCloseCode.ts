@@ -9,7 +9,7 @@ export const enum StreamCloseCode {
     // => 400 Abort codes
     ReceiveTimeout = 400,
     ConnectionLost = 401,
-    ChunkResolveFailure = 402,
+    InvalidChunk = 402,
     AcceptTimeout = 403,
     Abort = 404
 }

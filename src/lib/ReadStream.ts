@@ -8,6 +8,7 @@ import {Writable} from "./Utils";
 import {StreamCloseCode} from "./StreamCloseCode";
 import {StreamState} from "./StreamState";
 import Communicator from "./Communicator";
+import { DataType } from "./DataType";
 
 export default class ReadStream {
 
@@ -26,7 +27,7 @@ export default class ReadStream {
      * @description
      * The listener that will be called after each chunk that is received.
      */
-    public onChunk: (chunk: any) => void | Promise<any> = () => {};
+    public onChunk: (chunk: any, type: DataType) => void | Promise<any> = () => {};
     /**
      * @description
      * The listener will be called when the stream has closed.
@@ -109,21 +110,24 @@ export default class ReadStream {
     /**
      * @internal
      */
-    _addChunkToChain(chunkPromise: Promise<any | ArrayBuffer>) {
+    _addChunkToChain(chunk: Promise<any> | ArrayBuffer, type: DataType) {
         if(this.state === StreamState.Open && !this._chainClosed) {
             if(this._receiveTimeoutActive) this._resetReceiveTimeout();
-            this._chain = this._chain.then(() => this._handleChunkPromise(chunkPromise));
+            this._chain = this._chain.then(() => this._handleChunk(chunk, type));
         }
     }
 
-    private async _handleChunkPromise(chunkPromise: Promise<any | ArrayBuffer>) {
-        try {this._newChunk(await chunkPromise);}
-        catch (e) {this._close(StreamCloseCode.ChunkResolveFailure);}
+    private async _handleChunk(chunk: Promise<any> | ArrayBuffer, type: DataType) {
+        try {this._newChunk(await chunk,type);}
+        catch (e) {
+            this._close(StreamCloseCode.InvalidChunk);
+            this.communicator.onInvalidMessage(e);
+        }
     }
 
-    private _newChunk(chunk: any | ArrayBuffer) {
+    private _newChunk(chunk: any | ArrayBuffer, type: DataType) {
         if(this.state === StreamState.Open) {
-            try {this.onChunk(chunk);}
+            try {this.onChunk(chunk,type);}
             catch(err) {this._onListenerError(err);}
         }
     }

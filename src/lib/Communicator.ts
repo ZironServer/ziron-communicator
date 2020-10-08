@@ -9,7 +9,7 @@ import {
     BundlePacket,
     PacketType,
 } from "./Protocol";
-import {DataType, DataTypeSymbol, isMixedJSONDataType, parseJSONDataType} from "./DataType";
+import {DataType, containsStreams, isMixedJSONDataType, parseJSONDataType} from "./DataType";
 import {dehydrateError, hydrateError} from "./ErrorUtils";
 import {decodeJson, encodeJson, JSONString} from "./JsonUtils";
 import ReadStream from "./ReadStream";
@@ -27,8 +27,9 @@ interface PreparePackageOptions {
     processComplexTypes?: boolean
 }
 
-type TransmitListener = (event: any, data: any) => void | Promise<void>;
-type InvokeListener = (event: any, data: any, end: (data?: any, processComplexTypes?: boolean) => void, reject: (err?: any) => void) => void | Promise<void>
+type TransmitListener = (event: any, data: any, type: DataType) => void | Promise<void>;
+type InvokeListener = (event: any, data: any, end: (data?: any, processComplexTypes?: boolean) => void, 
+    reject: (err?: any) => void, type: DataType) => void | Promise<void>
 
 /**
  * A prepared package contains prepared or multiple packets.
@@ -48,8 +49,8 @@ type PreparedPackage = (string | ArrayBuffer)[] & {
     _beforeSend?: () => void;
 };
 
-type PreparedInvokePackage = PreparedPackage & {
-    promise: Promise<any>
+type PreparedInvokePackage<T = any> = PreparedPackage & {
+    promise: Promise<T>
 }
 
 const PING = 57;
@@ -68,7 +69,7 @@ export default class Communicator {
     public static packetBinaryResolverLimit: number = 40;
     public static packetStreamLimit: number = 20;
     public static streamsEnabled: boolean = true;
-    public static allowStreamAsChunk: boolean = false;
+    public static chunksCanContainStreams: boolean = false;
 
     public onInvalidMessage: (err: Error) => void;
     /**
@@ -122,7 +123,13 @@ export default class Communicator {
      * because prepared packets with old ids can exist.
      */
     private _cid: number = 0;
-    private _invokeResponsePromises: Record<number,{resolve: (data: any) => void,reject: (err: any) => void,timeout?: NodeJS.Timeout}> = {};
+    private _invokeResponsePromises: Record<number,
+        {
+            resolve: (data: any) => void,
+            reject: (err: any) => void,
+            timeout?: NodeJS.Timeout,
+            returnDataType?: boolean
+        }> = {};
 
     private _batchSendList: PreparedPackage[] = [];
     private _batchTimeoutDelay: number | undefined;
@@ -228,25 +235,27 @@ export default class Communicator {
         else this.onInvalidMessage(new Error('Unknown binary package header type.'))
     }
 
-    private _processTransmit(event: string,data: any) {
-        try {this.onTransmit(event,data)}
+    private _processTransmit(event: string,data: any,dataType: DataType) {
+        try {this.onTransmit(event,data,dataType)}
         catch(err) {this._onListenerError(err)}
     }
 
     private async _processJsonActionPacket(packet: ActionPacket) {
         switch (packet['0']) {
             case PacketType.Transmit:
-                 return this._processTransmit(packet['1'],await this._processData(packet['2'],packet['3']));
+                 return this._processTransmit(packet['1'],await this._processData(packet['2'],packet['3']),packet['2']);
             case PacketType.Invoke:
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
                 return this._processInvoke(this.onInvoke,packet['1'],packet['2'],
-                    await this._processData(packet['3'],packet['4']))
+                    await this._processData(packet['3'],packet['4']),packet['3'])
             case PacketType.InvokeDataResp:
                 const resp = this._invokeResponsePromises[packet['1']];
                 if (resp) {
                     clearTimeout(resp.timeout!);
                     delete this._invokeResponsePromises[packet['1']];
-                    return resp.resolve(await this._processData(packet['2'],packet['3']));
+                    return resp.resolve(resp.returnDataType ? 
+                        [await this._processData(packet['2'],packet['3']),packet['2']] : 
+                        await this._processData(packet['2'],packet['3']));
                 }
                 return;
             case PacketType.StreamChunk: return this._processJsonStreamChunk(packet['1'],packet['2'],packet['3']);
@@ -282,32 +291,38 @@ export default class Communicator {
     private _processJsonWriteStreamClose(streamId: number, code: StreamCloseCode | number, dataType?: DataType, data?: any) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
-            if(typeof dataType === 'number' && (dataType !== DataType.Stream || Communicator.allowStreamAsChunk))
-                stream._addChunkToChain(this._processData(dataType,data));
+            if(typeof dataType === 'number') {
+                if(containsStreams(dataType) && !Communicator.chunksCanContainStreams)
+                    throw new Error('Streams in chunks are not allowed.');
+                stream._addChunkToChain(this._processData(dataType,data),dataType);
+            }
             if(typeof code === 'number') stream._addCloseToChain(code);
         }
     }
 
     private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any) {
         const stream = this._activeReadStreams[streamId];
-        if(stream && (dataType !== DataType.Stream || Communicator.allowStreamAsChunk))
-            stream._addChunkToChain(this._processData(dataType,data));
+        if(stream) {
+            if(containsStreams(dataType) && !Communicator.chunksCanContainStreams)
+                throw new Error('Streams in chunks are not allowed.');
+            stream._addChunkToChain(this._processData(dataType,data),dataType);
+        }       
     }
 
     private _processBinaryStreamChunk(streamId: number, binary: ArrayBuffer) {
         const stream = this._activeReadStreams[streamId];
-        if(stream) stream._addChunkToChain(Promise.resolve(binary));
+        if(stream) stream._addChunkToChain(binary,DataType.Binary);
     }
 
     private _processBinaryStreamClose(streamId: number, code: StreamCloseCode | number, binary: ArrayBuffer) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
-            if(binary.byteLength > 0) stream._addChunkToChain(Promise.resolve(binary));
+            if(binary.byteLength > 0) stream._addChunkToChain(binary,DataType.Binary);
             if(typeof code === 'number') stream._addCloseToChain(code);
         }
     }
 
-    private _processInvoke(caller: InvokeListener, event: any, callId: number, data: any) {
+    private _processInvoke(caller: InvokeListener, event: any, callId: number, data: any, dataType: DataType) {
         let called;
         try {
             caller(event, data,(data, processComplexTypes) => {
@@ -320,7 +335,7 @@ export default class Communicator {
                 this.send(PacketType.InvokeErrResp + ',' +
                     callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err)))
                 );
-            });
+            },dataType);
         }
         catch(err) {this._onListenerError(err);}
     }
@@ -356,10 +371,7 @@ export default class Communicator {
     }
 
     private _processData(type: DataType, data: any): Promise<any> | any {
-        if (type === DataType.JSON) {
-            if(typeof data === 'object' && data) data[DataTypeSymbol] = DataType.JSON;
-            return data;
-        }
+        if (type === DataType.JSON) return data;
         else if (type === DataType.Binary) {
             if(typeof data !== 'number') throw new Error('Invalid binary placeholder type.');
             return this._createBinaryResolver(data);
@@ -373,7 +385,6 @@ export default class Communicator {
             });
             return new Promise(async resolve => {
                 await Promise.all(promises);
-                if(typeof wrapper[0] === 'object' && wrapper[0]) wrapper[0][DataTypeSymbol] = type;
                 resolve(wrapper[0]);
             });
         } else if(type === DataType.Stream && Communicator.streamsEnabled) {
@@ -603,11 +614,11 @@ export default class Communicator {
      * @param data
      * @param ackTimeout
      */
-    prepareInvoke(
+    prepareInvoke<RDT extends true | false | undefined>(
         event: string,
         data?: any,
-        {ackTimeout,processComplexTypes}: {ackTimeout?: number | null} & PreparePackageOptions = {}
-        ): PreparedInvokePackage
+        {ackTimeout,processComplexTypes,returnDataType}: {ackTimeout?: number | null, returnDataType?: RDT} & PreparePackageOptions = {}
+        ): PreparedInvokePackage<RDT extends true ? [any,DataType] : any>
     {
         const callId = this._getNewCid();
         const preparedPackage: PreparedInvokePackage = [] as any;
@@ -615,7 +626,7 @@ export default class Communicator {
         let setResponseTimeout: (() => void) | undefined = undefined;
 
         preparedPackage.promise = new Promise<any>((resolve, reject) => {
-            this._invokeResponsePromises[callId] = {resolve, reject};
+            this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
             setResponseTimeout = () => {
                 if(this._invokeResponsePromises[callId] && this._invokeResponsePromises[callId].timeout === undefined)
                     this._invokeResponsePromises[callId].timeout = setTimeout(() => {
@@ -686,8 +697,9 @@ export default class Communicator {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    invoke(event: string, data?: any, options:
-        {ackTimeout?: number | null, batchTimeLimit?: number} & PreparePackageOptions = {}): Promise<any>
+    invoke<RDT extends true | false | undefined>(event: string, data?: any, options:
+        {ackTimeout?: number | null, batchTimeLimit?: number,returnDataType?: RDT} & PreparePackageOptions = {}): 
+        Promise<RDT extends true ? [any,DataType] : any>
     {
         const prePackage = this.prepareInvoke(event,data,options);
         this.sendPreparedPackage(prePackage,options.batchTimeLimit);
@@ -764,7 +776,7 @@ export default class Communicator {
             this.send(PacketType.StreamChunk + ',' + streamId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
-        else if(Communicator.allowStreamAsChunk && data instanceof WriteStream){
+        else if(Communicator.chunksCanContainStreams && data instanceof WriteStream){
             const streamId = this._getNewStreamId();
             this.send(PacketType.StreamChunk + ',' + streamId + ',' +
                 DataType.Stream + ',' + streamId);
@@ -825,7 +837,7 @@ export default class Communicator {
                 this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
                     DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
             }
-            else if(Communicator.allowStreamAsChunk && data instanceof WriteStream){
+            else if(Communicator.chunksCanContainStreams && data instanceof WriteStream){
                 const streamId = this._getNewStreamId();
                 this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
                     DataType.Stream + ',' + streamId);
@@ -857,7 +869,8 @@ export default class Communicator {
 
     /**
      * @description
-     * Creates a prepared transmit package that can be sent to multiple communicators. 
+     * Creates a prepared transmit package that can be sent to multiple communicators 
+     * but not multiple times to the same communicator (except there is no binary data in the package).
      * This is extremely efficient when sending to a lot of communicators. 
      * Notice that streams are not supported but binaries are supported. 
      * After preparing you should not wait a long time to send the package to the targets.

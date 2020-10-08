@@ -10,7 +10,7 @@ import Communicator from "./lib/Communicator";
 import ReadStream from "./lib/ReadStream";
 import {StreamCloseCode} from "./lib/StreamCloseCode";
 import {StreamState} from "./lib/StreamState";
-import { DataType, typeofData } from "./lib/DataType";
+import { DataType, analyseTypeofData } from "./lib/DataType";
 import {TimeoutError,TimeoutType,InvalidActionError,ConnectionLostError} from "./lib/Errors";
 
 export {
@@ -24,6 +24,6 @@ export {
     TimeoutType,
     InvalidActionError,
     ConnectionLostError,
-    typeofData,
+    analyseTypeofData,
     DataType
 }

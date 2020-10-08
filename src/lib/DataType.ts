@@ -16,14 +16,12 @@ export const enum DataType {
     JSONWithStreamsAndBinary
 }
 
-export const DataTypeSymbol = Symbol();
-
-ArrayBuffer[DataTypeSymbol] = DataType.Binary;
-WriteStream[DataTypeSymbol] = DataType.Stream;
-ReadStream[DataTypeSymbol] = DataType.Stream;
-
 export function isMixedJSONDataType(type: DataType) {
-    return type > 2;
+    return type > 2 && type < 6;
+}
+
+export function containsStreams(type: DataType) {
+    return type > 1 && type !== DataType.JSONWithBinaries;
 }
 
 export function parseJSONDataType(containsBinary?: boolean, containsStreams?: boolean): DataType {
@@ -32,19 +30,14 @@ export function parseJSONDataType(containsBinary?: boolean, containsStreams?: bo
     else return containsStreams ? DataType.JSONWithStreams : DataType.JSON;
 }
 
-export function typeofData(data: any): DataType {
+export function analyseTypeofData(data: any): DataType {
     if(typeof data === 'object' && data){
-        if(typeof data[DataTypeSymbol] === 'number') return data[DataTypeSymbol];
+        if(data instanceof ArrayBuffer) return DataType.Binary;
+        else if(data instanceof ReadStream || data instanceof WriteStream) return DataType.Stream;
         else {
-            //analyse data...
-            if(data instanceof ArrayBuffer) return DataType.Binary;
-            else if(data instanceof ReadStream || data instanceof WriteStream) return DataType.Stream;
-            else {
-                const meta: {binaries?: boolean, streams?: boolean} = {};
-                _analyseDataDeep(data,meta);
-                return parseJSONDataType(meta.binaries,meta.streams);
-            }
-
+            const meta: {binaries?: boolean, streams?: boolean} = {};
+            _analyseDataDeep(data,meta);
+            return parseJSONDataType(meta.binaries,meta.streams);
         }
     }
     else return DataType.JSON;
