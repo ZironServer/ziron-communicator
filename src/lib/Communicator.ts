@@ -217,7 +217,7 @@ export default class Communicator {
     }
 
     private _processBinaryPacket(buffer: ArrayBuffer) {
-        const header = (new Uint8Array(buffer.slice(0,1)))[0];
+        const header = (new Uint8Array(buffer,0,1))[0];
         if(header === PacketType.BinaryReference) {
             const id = (new Float64Array(buffer.slice(1,9)))[0];
             const resolver = this._binaryResolver[id];
