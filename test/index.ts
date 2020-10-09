@@ -37,7 +37,7 @@ describe('Ziron', () => {
         expectedData: {name: 'Luca', age: 21},
         expectedDataType: DataType.JSON,
         processComplexTypes: false
-      }, 
+      },
       {
         title: 'Transmit with circular JSON data should be handled.',
         data: (() => {
@@ -249,18 +249,18 @@ describe('Ziron', () => {
         processComplexTypes: true
       },
       {
-        title: 'B1 and B2 should receive the multi transmit with MixedJSON (JSON with binary) 2.', 
+        title: 'B1 and B2 should receive the multi transmit with MixedJSON (JSON with binary) 2.',
         data: {image: new ArrayBuffer(50), cover: new ArrayBuffer(100)},
         processComplexTypes: true
       },
       {
-        title: 'B1 and B2 should receive the multi transmit with binary data.', 
+        title: 'B1 and B2 should receive the multi transmit with binary data.',
         data: new ArrayBuffer(100),
         processComplexTypes: true
       }
     ]
     .forEach(test => {
-      it(test.title, async () => {  
+      it(test.title, async () => {
         const receivePromise = Promise.all([comB1,comB2].map(c => {
           return new Promise((res,rej) =>  {
             c.onTransmit = (event,data) => {
@@ -271,13 +271,13 @@ describe('Ziron', () => {
               }
               catch(e) {rej(e);}
             };
-          }); 
+          });
         }));
-  
+
         const prepPackage = Communicator.prepareMultiTransmit('person',test.data,
           {processComplexTypes: test.processComplexTypes});
         [comA1,comA2].forEach(c => c.sendPreparedPackage(prepPackage))
-  
+
         await receivePromise;
       });
     })
@@ -451,11 +451,16 @@ describe('Ziron', () => {
 
   });
 
-  describe('Ping', () => {
+  describe('Ping/Pong', () => {
 
     it('B should receive ping.', (done) => {
       comB1.onPing = () => done();
       comA1.sendPing();
+    });
+
+    it('B should receive pong.', (done) => {
+      comB1.onPong = () => done();
+      comA1.sendPong();
     });
 
   });
@@ -651,12 +656,12 @@ describe('Ziron', () => {
     it(`Using the same write stream multiple times should throw an error.`, () => {
       const stream = new WriteStream();
       comA1.transmit('event',stream,{processComplexTypes: true});
-        
+
       expect(function () {
         comA1.transmit('event',stream,{processComplexTypes: true})
       }).to.throw(Error,'Write-stream already used.');
     });
-  
+
   });
 
 });
