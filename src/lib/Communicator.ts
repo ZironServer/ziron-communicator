@@ -56,6 +56,9 @@ type PreparedInvokePackage<T = any> = PreparedPackage & {
 const PING = 57;
 const PING_BINARY = new Uint8Array([PING]);
 
+const PONG = 65;
+const PONG_BINARY = new Uint8Array([PONG]);
+
 export default class Communicator {
 
     /**
@@ -81,6 +84,7 @@ export default class Communicator {
     public onTransmit: TransmitListener;
     public onInvoke: InvokeListener;
     public onPing: () => void;
+    public onPong: () => void;
     public send: (msg: string | ArrayBuffer) => void;
 
     public readonly connectionLostStamp: number = -1;
@@ -91,6 +95,7 @@ export default class Communicator {
         onTransmit?: TransmitListener;
         onInvoke?: InvokeListener;
         onPing?: () => void;
+        onPong?: () => void;
         send?: (msg: string | ArrayBuffer) => void;
     } = {}) {
         this.onInvalidMessage = connector.onInvalidMessage || (() => {});
@@ -98,6 +103,7 @@ export default class Communicator {
         this.onTransmit = connector.onTransmit || (() => {});
         this.onInvoke = connector.onInvoke || (() => {});
         this.onPing = connector.onPing || (() => {});
+        this.onPong = connector.onPong || (() => {});
         this.send = connector.send || (() => {});
     }
 
@@ -141,9 +147,16 @@ export default class Communicator {
     emitMessage(rawMsg: string | ArrayBuffer) {
         try {
             if(typeof rawMsg !== "string"){
-                if(rawMsg.byteLength === 1 && (new Uint8Array(rawMsg))[0] === PING) {
-                    try {this.onPing();}
-                    catch (err) {this.onListenerError(err)}
+                if(rawMsg.byteLength === 1) {
+                    if((new Uint8Array(rawMsg))[0] === PING) {
+                        try {this.onPing();}
+                        catch (err) {this.onListenerError(err)}
+                    }
+                    else if((new Uint8Array(rawMsg))[0] === PONG) {
+                        try {this.onPong();}
+                        catch (err) {this.onListenerError(err)}
+                    }
+                    else this._processBinaryPacket(rawMsg);
                 }
                 else this._processBinaryPacket(rawMsg);
             }
@@ -714,6 +727,11 @@ export default class Communicator {
     // noinspection JSUnusedGlobalSymbols
     sendPing() {
         this.send(PING_BINARY);
+    }
+
+    // noinspection JSUnusedGlobalSymbols
+    sendPong() {
+        this.send(PONG_BINARY);
     }
 
     private _sendPreparedPackage(preparedPackage: PreparedPackage) {
