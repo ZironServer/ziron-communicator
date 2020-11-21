@@ -6,7 +6,7 @@ Copyright(c) Luca Scaringella
 
 import {JSONString} from "./lib/JsonUtils";
 import WriteStream from "./lib/WriteStream";
-import Communicator from "./lib/Communicator";
+import Communicator, {TransmitListener,InvokeListener} from "./lib/Communicator";
 import ReadStream from "./lib/ReadStream";
 import {StreamCloseCode} from "./lib/StreamCloseCode";
 import {StreamState} from "./lib/StreamState";
@@ -25,5 +25,7 @@ export {
     InvalidActionError,
     ConnectionLostError,
     analyseTypeofData,
-    DataType
+    DataType,
+    TransmitListener,
+    InvokeListener
 }
