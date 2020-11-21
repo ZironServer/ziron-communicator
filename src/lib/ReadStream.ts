@@ -125,9 +125,9 @@ export default class ReadStream {
         }
     }
 
-    private _newChunk(chunk: any | ArrayBuffer, type: DataType) {
+    private async _newChunk(chunk: any | ArrayBuffer, type: DataType) {
         if(this.state === StreamState.Open) {
-            try {this.onChunk(chunk,type);}
+            try {await this.onChunk(chunk,type);}
             catch(err) {this._onListenerError(err);}
         }
     }
