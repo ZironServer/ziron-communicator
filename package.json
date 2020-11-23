@@ -1,13 +1,13 @@
 {
-  "name": "ziron",
-  "description": "The protocol implementation that Zation core and client uses.",
+  "name": "ziron-communicator",
+  "description": "The protocol implementation that Ziron server and client uses.",
   "version": "0.2.3",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "license": "SEE LICENSE IN <https://github.com/ZationServer/zation/wiki/Zation-End-User-License-Agreement>",
+  "license": "UNLICENSED",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ZationServer/ziron.git"
+    "url": "https://github.com/ZironServer/ziron-communicator.git"
   },
   "author": {
     "name": "Luca Scaringella",
@@ -41,8 +41,11 @@
     "test": "nyc --reporter=html --reporter=text mocha --exit -r ts-node/register test/**/*.ts"
   },
   "keywords": [
-    "zation",
+    "ziron",
     "protocol",
-    "core"
+    "communicator",
+    "core",
+    "fast",
+    "lightway"
   ]
 }
