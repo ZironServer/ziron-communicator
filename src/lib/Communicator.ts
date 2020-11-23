@@ -67,8 +67,10 @@ export default class Communicator {
      */
     public static readStream: typeof ReadStream = ReadStream;
 
-    public static binaryResolveTimeout: number = 10000;
+    public ackTimeout?: number;
+
     public static ackTimeout: number = 10000;
+    public static binaryResolveTimeout: number = 10000;
     public static packetBinaryResolverLimit: number = 40;
     public static packetStreamLimit: number = 20;
     public static streamsEnabled: boolean = true;
@@ -645,7 +647,7 @@ export default class Communicator {
                     this._invokeResponsePromises[callId].timeout = setTimeout(() => {
                         delete this._invokeResponsePromises[callId];
                         reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
-                    }, ackTimeout || Communicator.ackTimeout);
+                    }, ackTimeout || this.ackTimeout || Communicator.ackTimeout);
             }
         });
 
