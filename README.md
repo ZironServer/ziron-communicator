@@ -1,5 +1,5 @@
-# ziron
-This module is the implementation of the Zations 'Ziron' protocol that is used in the core server and client of Zation. 
+# ziron-communicator
+This module is the implementation of the protocol that is used in the server and client of Ziron. 
 
 The protocol has two possible ways to communicate between two communicators and is blazing fast. 
 Invokes represent the request/response principle. 
@@ -8,4 +8,4 @@ Transmits represent a simple transmit from A to B without a response from B.
 All data that is sent in invokes or transmits can be JSON content, binary or a stream. 
 It is even possible to have JSON data that contains binary data or streams. 
 Streams can be used to stream data in chunks from one to the other side. 
-It is possible to use the Ziron implementation in any underlying structure that supports a bidirectional connection.
+It is possible to use the implementation in any underlying structure that supports a bidirectional connection.
