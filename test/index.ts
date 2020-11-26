@@ -1,4 +1,4 @@
-import {Communicator,JSONString,WriteStream,ReadStream,TimeoutError,
+import {Communicator,JSONString,WriteStream,ReadStream,TimeoutError,PreparedPackage,
   ConnectionLostError,StreamCloseCode, DataType, analyseTypeofData, StreamState} from './../src/index';
 import {expect, should} from 'chai';
 
@@ -207,6 +207,27 @@ describe('Ziron', () => {
       for(let i = 0; i < count; i++){
         comA1.transmit('batch','msg',{batchTimeLimit: 50});
       }
+    });
+
+    it('Should not send removed batched package.', (done) => {
+      const count = 10;
+
+      let receivedI = 0;
+      comB1.onTransmit = () => {
+        receivedI++;
+      };
+
+      const packages: PreparedPackage[] = [];
+      for(let i = 0; i < count; i++){
+        packages.push(Communicator.prepareMultiTransmit('batch','msg'));
+        comA1.sendPreparedPackage(packages[i],10);
+      }
+      packages.forEach(pack => comA1.removeFromBatchList(pack));
+
+      setTimeout(() => {
+        expect(receivedI).to.be.equal(0);
+        done();
+      },50)
     });
 
     it('Transmit a stream and a connection lost after sending should close the ReadStream after accepting.', (done) => {
