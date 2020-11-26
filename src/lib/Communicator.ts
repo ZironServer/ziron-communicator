@@ -743,6 +743,25 @@ export default class Communicator {
         if(preparedPackage._afterSend) preparedPackage._afterSend();
     }
 
+    /**
+     * @description
+     * Removes a package from the batch list if it is not already sent.
+     * The returned boolean indicates if it was successfully removed.
+     * @param preparedPackage
+     */
+    public removeFromBatchList(preparedPackage: PreparedPackage): boolean {
+        const index = this._batchSendList.indexOf(preparedPackage);
+        if(index !== -1) {
+            this._batchSendList.splice(index,1);
+            if(this._batchSendList.length === 0 && this._batchTimeoutTicker) {
+                clearTimeout(this._batchTimeoutTicker);
+                this._batchTimeoutTicker = undefined;
+            }
+            return true;
+        }
+        return false;
+    }
+
     private _addToBatchList(preparedPackage: PreparedPackage, batchTimeLimit: number) {
         this._batchSendList.push(preparedPackage);
         if(this._batchTimeoutTicker) {
