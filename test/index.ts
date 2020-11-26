@@ -209,7 +209,7 @@ describe('Ziron', () => {
       }
     });
 
-    it('Should not send removed batched package.', (done) => {
+    it('Should not send cancelled batch packages.', (done) => {
       const count = 10;
 
       let receivedI = 0;
@@ -222,7 +222,7 @@ describe('Ziron', () => {
         packages.push(Communicator.prepareMultiTransmit('batch','msg'));
         comA1.sendPreparedPackage(packages[i],10);
       }
-      packages.forEach(pack => comA1.removeFromBatchList(pack));
+      packages.forEach(pack => comA1.cancelBatchPackage(pack));
 
       setTimeout(() => {
         expect(receivedI).to.be.equal(0);

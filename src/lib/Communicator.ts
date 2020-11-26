@@ -746,10 +746,10 @@ export default class Communicator {
     /**
      * @description
      * Removes a package from the batch list if it is not already sent.
-     * The returned boolean indicates if it was successfully removed.
+     * The returned boolean indicates if it was successfully cancelled.
      * @param preparedPackage
      */
-    public removeFromBatchList(preparedPackage: PreparedPackage): boolean {
+    public cancelBatchPackage(preparedPackage: PreparedPackage): boolean {
         const index = this._batchSendList.indexOf(preparedPackage);
         if(index !== -1) {
             this._batchSendList.splice(index,1);
