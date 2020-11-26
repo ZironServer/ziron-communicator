@@ -6,7 +6,7 @@ Copyright(c) Luca Scaringella
 
 import {JSONString} from "./lib/JsonUtils";
 import WriteStream from "./lib/WriteStream";
-import Communicator, {TransmitListener,InvokeListener} from "./lib/Communicator";
+import Communicator, {TransmitListener,InvokeListener, PreparedPackage} from "./lib/Communicator";
 import ReadStream from "./lib/ReadStream";
 import {StreamCloseCode} from "./lib/StreamCloseCode";
 import {StreamState} from "./lib/StreamState";
@@ -27,5 +27,6 @@ export {
     analyseTypeofData,
     DataType,
     TransmitListener,
-    InvokeListener
+    InvokeListener,
+    PreparedPackage
 }

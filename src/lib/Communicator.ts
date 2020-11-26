@@ -34,7 +34,7 @@ export type InvokeListener = (event: any, data: any, end: (data?: any, processCo
 /**
  * A prepared package contains prepared or multiple packets.
  */
-type PreparedPackage = (string | ArrayBuffer)[] & {
+export type PreparedPackage = (string | ArrayBuffer)[] & {
     /**
      * @description
      * Used to open write streams.
