@@ -16,7 +16,7 @@ import ReadStream from "./ReadStream";
 import WriteStream from "./WriteStream";
 import {StreamCloseCode} from "./StreamCloseCode";
 import {Writable} from "./Utils";
-import {TimeoutError,TimeoutType,InvalidActionError,ConnectionLostError} from "./Errors";
+import {TimeoutError, TimeoutType, InvalidActionError, BadConnectionError, BadConnectionType} from "./Errors";
 
 interface PreparePackageOptions {
     /**
@@ -89,7 +89,7 @@ export default class Communicator {
     public onPong: () => void;
     public send: (msg: string | ArrayBuffer) => void;
 
-    public readonly connectionLostStamp: number = -1;
+    public readonly badConnectionTimestamp: number = -1;
 
     constructor(connector: {
         onInvalidMessage?: (err: Error) => void;
@@ -144,7 +144,7 @@ export default class Communicator {
     private _batchTimeoutTicker: NodeJS.Timeout | undefined;
     private _batchTimeoutTimestamp: number | undefined;
 
-    private _connectionLostOnceListener: (() => void)[] = [];
+    private _badConnectionOnceListener: ((error: BadConnectionError) => void)[] = [];
 
     emitMessage(rawMsg: string | ArrayBuffer) {
         try {
@@ -184,15 +184,16 @@ export default class Communicator {
         catch(e){this.onInvalidMessage(e);}
     }
 
-    emitConnectionLost() {
-        (this as Writable<Communicator>).connectionLostStamp = Date.now();
+    emitBadConnection(type: BadConnectionType,msg?: string) {
+        const err = new BadConnectionError(type,msg);
+        (this as Writable<Communicator>).badConnectionTimestamp = Date.now();
         this._clearBinaryResolver();
-        this._rejectInvokeRespPromises(new ConnectionLostError());
-        this._connectionLostToStreams();
+        this._rejectInvokeRespPromises(err);
+        this._emitBadConnectionToStreams();
         this._activeReadStreams = {};
         this._activeWriteStreams = {};
-        for(let i = 0; i < this._connectionLostOnceListener.length; i++) this._connectionLostOnceListener[i]();
-        this._connectionLostOnceListener = [];
+        for(let i = 0; i < this._badConnectionOnceListener.length; i++) this._badConnectionOnceListener[i](err);
+        this._badConnectionOnceListener = [];
     }
 
     private _onListenerError(err: Error) {
@@ -507,14 +508,14 @@ export default class Communicator {
         this._binaryResolver = {};
     }
 
-    private _connectionLostToStreams() {
+    private _emitBadConnectionToStreams() {
         for (const k in this._activeReadStreams) {
             if (this._activeReadStreams.hasOwnProperty(k))
-                this._activeReadStreams[k]._connectionLost();
+                this._activeReadStreams[k]._emitBadConnection();
         }
         for (const k in this._activeWriteStreams) {
             if (this._activeWriteStreams.hasOwnProperty(k))
-                this._activeWriteStreams[k]._connectionLost();
+                this._activeWriteStreams[k]._emitBadConnection();
         }
     }
 
@@ -696,12 +697,11 @@ export default class Communicator {
     async sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batchTimeLimit?: number): Promise<void> {
         if(batchTimeLimit) {
             return new Promise((resolve, reject) => {
-                const connectionLostListener = () => reject(new ConnectionLostError());
-                this._connectionLostOnceListener.push(connectionLostListener);
+                this._badConnectionOnceListener.push(reject);
                 const tmpAfterSend = preparedPackage._afterSend;
                 preparedPackage._afterSend = () => {
-                    const listenerIndex = this._connectionLostOnceListener.indexOf(connectionLostListener);
-                    if(listenerIndex !== -1) this._connectionLostOnceListener.splice(listenerIndex, 1);
+                    const listenerIndex = this._badConnectionOnceListener.indexOf(reject);
+                    if(listenerIndex !== -1) this._badConnectionOnceListener.splice(listenerIndex, 1);
                     if(tmpAfterSend) tmpAfterSend();
                     resolve();
                 }

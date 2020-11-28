@@ -59,7 +59,7 @@ export default class WriteStream {
         clearTimeout(this._acceptTimeoutTicker);
         (this as Writable<WriteStream>).state = StreamState.Open;
         try {this.onOpen()}
-        catch(err) {this._onListenerError(err)} 
+        catch(err) {this._onListenerError(err)}
     }
 
     private _onListenerError(err: Error) {
@@ -88,11 +88,11 @@ export default class WriteStream {
     /**
      * @internal
      */
-    _connectionLost() {
+    _emitBadConnection() {
         if(this.state === StreamState.Closed) return;
         (this as Writable<WriteStream>).state = StreamState.Closed;
         clearTimeout(this._acceptTimeoutTicker);
-        try {this.onClose(StreamCloseCode.ConnectionLost)}
+        try {this.onClose(StreamCloseCode.BadConnection)}
         catch(err) {this._onListenerError(err)}
         this._closePromiseResolve();
     }

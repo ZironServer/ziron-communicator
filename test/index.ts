@@ -1,6 +1,18 @@
-import {Communicator,JSONString,WriteStream,ReadStream,TimeoutError,PreparedPackage,
-  ConnectionLostError,StreamCloseCode, DataType, analyseTypeofData, StreamState} from './../src/index';
-import {expect, should} from 'chai';
+import {
+  analyseTypeofData,
+  BadConnectionError,
+  BadConnectionType,
+  Communicator,
+  DataType,
+  JSONString,
+  PreparedPackage,
+  ReadStream,
+  StreamCloseCode,
+  StreamState,
+  TimeoutError,
+  WriteStream
+} from './../src/index';
+import {expect} from 'chai';
 
 const comA1 = new Communicator({
   onInvalidMessage: (err) => console.error('A1: Invalid meessage: ', err),
@@ -232,24 +244,24 @@ describe('Ziron', () => {
 
     it('Transmit a stream and a connection lost after sending should close the ReadStream after accepting.', (done) => {
 
-      let simulatedConnectionLostPromise;
+      let simulatedBadConnectionPromise;
 
       comB1.onTransmit = async (event,data: ReadStream) => {
-        await simulatedConnectionLostPromise;
+        await simulatedBadConnectionPromise;
         expect(event).to.be.equal('stream');
         expect(data).to.be.instanceOf(ReadStream);
         expect(data.state).to.be.equal(StreamState.Pending);
 
         data.onClose = (code) => {
-          expect(code).to.be.equal(StreamCloseCode.ConnectionLost);
+          expect(code).to.be.equal(StreamCloseCode.BadConnection);
           done();
         };
         data.accept();
       };
 
-      simulatedConnectionLostPromise = new Promise(async (res) => {
+      simulatedBadConnectionPromise = new Promise(async (res) => {
         await comA1.transmit('stream',new WriteStream(),{processComplexTypes: true});
-        comB1.emitConnectionLost();
+        comB1.emitBadConnection(BadConnectionType.Disconnect);
         res();
       })
     });
@@ -453,10 +465,10 @@ describe('Ziron', () => {
     it('A should receive a connection lost error by an invoke with connection lost.', (done) => {
       comB1.onInvoke = () => {};
       comA1.invoke('?').catch(err => {
-        expect(err).to.be.instanceof(ConnectionLostError)
+        expect(err).to.be.instanceof(BadConnectionError)
         done();
       });
-      comA1.emitConnectionLost();
+      comA1.emitBadConnection(BadConnectionType.Disconnect);
     });
 
     it('A should receive the invoke response with the data type.', (done) => {

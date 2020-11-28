@@ -25,9 +25,14 @@ export class InvalidActionError extends Error {
     }
 }
 
-export class ConnectionLostError extends Error {
-    constructor(message: string = 'The connection is lost.') {
+export enum BadConnectionType {
+    Disconnect,
+    ConnectAbort
+}
+
+export class BadConnectionError extends Error {
+    constructor(type: BadConnectionType,message: string = 'Bad connection') {
         super(message);
-        this.name = 'ConnectionLostError';
+        this.name = 'BadConnectionError';
     }
 }

@@ -17,7 +17,7 @@ export default class ReadStream {
     private _chainClosed: boolean;
     private _chain: Promise<any>;
 
-    private readonly _createdConnectionLostStamp: number;
+    private readonly _createdBadConnectionTimestamp: number;
 
     private _receiveTimeoutActive: boolean;
     private _receiveTimeout: number;
@@ -46,15 +46,15 @@ export default class ReadStream {
     public readonly closedCode?: StreamCloseCode | number;
 
     constructor(private readonly id: number, private readonly communicator: Communicator) {
-        this._createdConnectionLostStamp = communicator.connectionLostStamp;
+        this._createdBadConnectionTimestamp = communicator.badConnectionTimestamp;
     }
 
     accept(receiveTimeout: number | null = 5000) {
         if(this.state !== StreamState.Pending) return;
 
-        if(this._createdConnectionLostStamp !== this.communicator.connectionLostStamp) {
+        if(this._createdBadConnectionTimestamp !== this.communicator.badConnectionTimestamp) {
             //The connection was lost in-between time.
-            return this._connectionLost();
+            return this._emitBadConnection();
         }
 
         //init
@@ -147,8 +147,8 @@ export default class ReadStream {
     /**
      * @internal
      */
-    _connectionLost() {
-        this._close(StreamCloseCode.ConnectionLost,false);
+    _emitBadConnection() {
+        this._close(StreamCloseCode.BadConnection,false);
     }
 
     /**
