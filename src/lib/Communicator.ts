@@ -775,6 +775,15 @@ export default class Communicator {
         else this._setBatchTimeout(batchTimeLimit);
     }
 
+    // noinspection JSUnusedGlobalSymbols
+    public flushBatchBuffer() {
+        if(this._batchTimeoutTicker) {
+            clearTimeout(this._batchTimeoutTicker);
+            this._batchTimeoutTicker = undefined;
+        }
+        this._flushBatch();
+    }
+
     private _onBatchTimeout = () => {
         this._batchTimeoutTicker = undefined;
         this._flushBatch();
