@@ -18,7 +18,7 @@ import {StreamCloseCode} from "./StreamCloseCode";
 import {Writable} from "./Utils";
 import {TimeoutError, TimeoutType, InvalidActionError, BadConnectionError, BadConnectionType} from "./Errors";
 
-interface PreparePackageOptions {
+export interface PreparePackageOptions {
     /**
      * Complex types are streams or array buffer.
      * If you want to send such types you need to activate this option.
