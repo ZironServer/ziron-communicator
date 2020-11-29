@@ -91,7 +91,7 @@ export default class Communicator {
 
     public readonly badConnectionTimestamp: number = -1;
 
-    constructor(connector: {
+    constructor(options: {
         onInvalidMessage?: (err: Error) => void;
         onListenerError?: (err: Error) => void;
         onTransmit?: TransmitListener;
@@ -99,14 +99,16 @@ export default class Communicator {
         onPing?: () => void;
         onPong?: () => void;
         send?: (msg: string | ArrayBuffer) => void;
+        ackTimeout?: number;
     } = {}) {
-        this.onInvalidMessage = connector.onInvalidMessage || (() => {});
-        this.onListenerError = connector.onListenerError || (() => {});
-        this.onTransmit = connector.onTransmit || (() => {});
-        this.onInvoke = connector.onInvoke || (() => {});
-        this.onPing = connector.onPing || (() => {});
-        this.onPong = connector.onPong || (() => {});
-        this.send = connector.send || (() => {});
+        this.onInvalidMessage = options.onInvalidMessage || (() => {});
+        this.onListenerError = options.onListenerError || (() => {});
+        this.onTransmit = options.onTransmit || (() => {});
+        this.onInvoke = options.onInvoke || (() => {});
+        this.onPing = options.onPing || (() => {});
+        this.onPong = options.onPong || (() => {});
+        this.send = options.send || (() => {});
+        this.ackTimeout = options.ackTimeout;
     }
 
     /**
