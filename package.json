@@ -1,7 +1,7 @@
 {
   "name": "ziron-communicator",
   "description": "The protocol implementation that Ziron server and client uses.",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "license": "UNLICENSED",
