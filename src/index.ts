@@ -12,6 +12,7 @@ import {StreamCloseCode} from "./lib/StreamCloseCode";
 import {StreamState} from "./lib/StreamState";
 import { DataType, analyseTypeofData } from "./lib/DataType";
 import {TimeoutError, TimeoutType, InvalidActionError, BadConnectionError, BadConnectionType} from "./lib/Errors";
+import {dehydrateError, hydrateError} from "./lib/ErrorUtils";
 
 export {
     Communicator,
@@ -29,5 +30,7 @@ export {
     DataType,
     TransmitListener,
     InvokeListener,
-    PreparedPackage
+    PreparedPackage,
+    hydrateError,
+    dehydrateError
 }
