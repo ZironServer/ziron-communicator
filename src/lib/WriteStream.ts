@@ -4,7 +4,7 @@ GitHub: LucaCode
 Copyright(c) Luca Scaringella
  */
 
-import Communicator from "./Communicator";
+import Transport from "./Transport";
 import {StreamCloseCode} from "./StreamCloseCode";
 import {StreamState} from "./StreamState";
 import {Writable} from "./Utils";
@@ -28,7 +28,7 @@ export default class WriteStream {
     public readonly closed: Promise<void> = new Promise(resolve => this._closePromiseResolve = resolve);
 
     private _id: number;
-    private _communicator: Communicator;
+    private _transport: Transport;
 
     private _acceptTimeoutTicker: NodeJS.Timeout;
 
@@ -41,12 +41,12 @@ export default class WriteStream {
      * @internal
      * @private
      */
-    _init(communicator: Communicator, id: number) {
+    _init(communicator: Transport, id: number) {
         if(this.state !== StreamState.Unused) throw new Error('Write-stream already used.');
-        this._communicator = communicator;
+        this._transport = communicator;
         this._id = id;
         (this as Writable<WriteStream>).state = StreamState.Pending;
-        this._communicator._addWriteStream(id,this);
+        this._transport._addWriteStream(id,this);
         this._acceptTimeoutTicker = setTimeout(() => this.close(StreamCloseCode.AcceptTimeout),
             WriteStream.acceptTimeout);
     }
@@ -71,15 +71,15 @@ export default class WriteStream {
 
     write(data: any, processComplexTypes?: boolean) {
         if(this.state !== StreamState.Open) return;
-        this._communicator._sendStreamChunk(this._id,data,processComplexTypes);
+        this._transport._sendStreamChunk(this._id,data,processComplexTypes);
     }
 
     writeAndClose(data: any, processComplexTypes?: boolean, code: StreamCloseCode | number = 200) {
         if(this.state !== StreamState.Open) return;
         (this as Writable<WriteStream>).state = StreamState.Closed;
-        this._communicator._sendWriteStreamClose(this._id,code,data,processComplexTypes);
+        this._transport._sendWriteStreamClose(this._id,code,data,processComplexTypes);
         clearTimeout(this._acceptTimeoutTicker);
-        this._communicator._removeWriteStream(this._id);
+        this._transport._removeWriteStream(this._id);
         try {this.onClose(code)}
         catch(err) {this._onListenerError(err)}
         this._closePromiseResolve();
@@ -103,8 +103,8 @@ export default class WriteStream {
         (this as Writable<WriteStream>).state = StreamState.Closed;
         if(prevState !== StreamState.Unused) {
             clearTimeout(this._acceptTimeoutTicker);
-            this._communicator._sendWriteStreamClose(this._id,code);
-            this._communicator._removeWriteStream(this._id);
+            this._transport._sendWriteStreamClose(this._id,code);
+            this._transport._removeWriteStream(this._id);
         }
         try {this.onClose(code)}
         catch(err) {this._onListenerError(err)}

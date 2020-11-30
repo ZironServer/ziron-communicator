@@ -7,7 +7,7 @@ Copyright(c) Luca Scaringella
 import {Writable} from "./Utils";
 import {StreamCloseCode} from "./StreamCloseCode";
 import {StreamState} from "./StreamState";
-import Communicator from "./Communicator";
+import Transport from "./Transport";
 import { DataType } from "./DataType";
 
 export default class ReadStream {
@@ -45,14 +45,14 @@ export default class ReadStream {
 
     public readonly closedCode?: StreamCloseCode | number;
 
-    constructor(private readonly id: number, private readonly communicator: Communicator) {
-        this._createdBadConnectionTimestamp = communicator.badConnectionTimestamp;
+    constructor(private readonly id: number, private readonly _transport: Transport) {
+        this._createdBadConnectionTimestamp = _transport.badConnectionTimestamp;
     }
 
     accept(receiveTimeout: number | null = 5000) {
         if(this.state !== StreamState.Pending) return;
 
-        if(this._createdBadConnectionTimestamp !== this.communicator.badConnectionTimestamp) {
+        if(this._createdBadConnectionTimestamp !== this._transport.badConnectionTimestamp) {
             //The connection was lost in-between time.
             return this._emitBadConnection();
         }
@@ -61,9 +61,9 @@ export default class ReadStream {
         this._chain = Promise.resolve();
         this._chainClosed = false;
 
-        this.communicator._addReadStream(this.id,this);
+        this._transport._addReadStream(this.id,this);
         (this as Writable<ReadStream>).state = StreamState.Open;
-        this.communicator._sendStreamAccept(this.id);
+        this._transport._sendStreamAccept(this.id);
         if(receiveTimeout != null) this.setReceiveTimeout(receiveTimeout);
     }
 
@@ -74,7 +74,11 @@ export default class ReadStream {
      * Also notifies the WriteStream.
      */
     close(code: StreamCloseCode | number = StreamCloseCode.Abort) {
-        this.communicator._sendReadStreamClose(this.id,code);
+        if(this._createdBadConnectionTimestamp !== this._transport.badConnectionTimestamp) {
+            //The connection was lost in-between time.
+            return this._emitBadConnection();
+        }
+        this._transport._sendReadStreamClose(this.id,code);
         this._close(code);
     }
 
@@ -121,7 +125,7 @@ export default class ReadStream {
         try {this._newChunk(await chunk,type);}
         catch (e) {
             this._close(StreamCloseCode.InvalidChunk);
-            this.communicator.onInvalidMessage(e);
+            this._transport.onInvalidMessage(e);
         }
     }
 
@@ -160,7 +164,7 @@ export default class ReadStream {
         (this as Writable<ReadStream>).closedCode = code;
         this._chainClosed = true;
         if(this._receiveTimeoutActive) clearTimeout(this._receiveTimeoutTick);
-        if(rmFromCommunicator) this.communicator._removeReadStream(this.id);
+        if(rmFromCommunicator) this._transport._removeReadStream(this.id);
         try {this.onClose(code);}
         catch(err) {this._onListenerError(err)}
         this._closedPromiseResolve();

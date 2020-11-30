@@ -41,12 +41,6 @@ export type PreparedPackage = (string | ArrayBuffer)[] & {
      * @internal
      */
     _afterSend?: () => void;
-    /**
-     * @description
-     * Used for sends with promises.
-     * @internal
-     */
-    _beforeSend?: () => void;
 };
 
 type PreparedInvokePackage<T = any> = PreparedPackage & {
@@ -59,7 +53,7 @@ const PING_BINARY = new Uint8Array([PING]);
 const PONG = 65;
 const PONG_BINARY = new Uint8Array([PONG]);
 
-export default class Communicator {
+export default class Transport {
 
     /**
      * The read stream class that is used.
@@ -68,8 +62,12 @@ export default class Communicator {
     public static readStream: typeof ReadStream = ReadStream;
 
     public ackTimeout?: number;
+    public limitBatchPackageLength: number = Transport.limitBatchPackageLength;
+    public maxBufferChunkLength?: number;
 
     public static ackTimeout: number = 10000;
+    public static limitBatchPackageLength: number = 310000;
+    public static maxBufferChunkLength: number = 200;
     public static binaryResolveTimeout: number = 10000;
     public static packetBinaryResolverLimit: number = 40;
     public static packetStreamLimit: number = 20;
@@ -91,7 +89,7 @@ export default class Communicator {
 
     public readonly badConnectionTimestamp: number = -1;
 
-    constructor(options: {
+    constructor(connector: {
         onInvalidMessage?: (err: Error) => void;
         onListenerError?: (err: Error) => void;
         onTransmit?: TransmitListener;
@@ -99,16 +97,15 @@ export default class Communicator {
         onPing?: () => void;
         onPong?: () => void;
         send?: (msg: string | ArrayBuffer) => void;
-        ackTimeout?: number;
-    } = {}) {
-        this.onInvalidMessage = options.onInvalidMessage || (() => {});
-        this.onListenerError = options.onListenerError || (() => {});
-        this.onTransmit = options.onTransmit || (() => {});
-        this.onInvoke = options.onInvoke || (() => {});
-        this.onPing = options.onPing || (() => {});
-        this.onPong = options.onPong || (() => {});
-        this.send = options.send || (() => {});
-        this.ackTimeout = options.ackTimeout;
+    } = {}, open: boolean = true) {
+        this.onInvalidMessage = connector.onInvalidMessage || (() => {});
+        this.onListenerError = connector.onListenerError || (() => {});
+        this.onTransmit = connector.onTransmit || (() => {});
+        this.onInvoke = connector.onInvoke || (() => {});
+        this.onPing = connector.onPing || (() => {});
+        this.onPong = connector.onPong || (() => {});
+        this.send = connector.send || (() => {});
+        this._open = open;
     }
 
     /**
@@ -141,12 +138,12 @@ export default class Communicator {
             returnDataType?: boolean
         }> = {};
 
-    private _batchSendList: PreparedPackage[] = [];
-    private _batchTimeoutDelay: number | undefined;
-    private _batchTimeoutTicker: NodeJS.Timeout | undefined;
-    private _batchTimeoutTimestamp: number | undefined;
+    private _open: boolean = true;
 
-    private _badConnectionOnceListener: ((error: BadConnectionError) => void)[] = [];
+    private _buffer: PreparedPackage[] = [];
+    private _bufferTimeoutDelay: number | undefined;
+    private _bufferTimeoutTicker: NodeJS.Timeout | undefined;
+    private _bufferTimeoutTimestamp: number | undefined;
 
     emitMessage(rawMsg: string | ArrayBuffer) {
         try {
@@ -187,15 +184,20 @@ export default class Communicator {
     }
 
     emitBadConnection(type: BadConnectionType,msg?: string) {
+        this._open = false;
+        this._clearBufferTimeout();
         const err = new BadConnectionError(type,msg);
-        (this as Writable<Communicator>).badConnectionTimestamp = Date.now();
+        (this as Writable<Transport>).badConnectionTimestamp = Date.now();
         this._clearBinaryResolver();
         this._rejectInvokeRespPromises(err);
         this._emitBadConnectionToStreams();
         this._activeReadStreams = {};
         this._activeWriteStreams = {};
-        for(let i = 0; i < this._badConnectionOnceListener.length; i++) this._badConnectionOnceListener[i](err);
-        this._badConnectionOnceListener = [];
+    }
+
+    emitOpen() {
+        this._open = true;
+        this._flushBuffer();
     }
 
     private _onListenerError(err: Error) {
@@ -220,8 +222,8 @@ export default class Communicator {
     }
 
     private static _getNewBinaryMultiPlaceholderId() {
-        if(Communicator._binaryMultiPlaceHolderId < Number.MIN_SAFE_INTEGER) Communicator._binaryMultiPlaceHolderId = -1;
-        return Communicator._binaryMultiPlaceHolderId--;
+        if(Transport._binaryMultiPlaceHolderId < Number.MIN_SAFE_INTEGER) Transport._binaryMultiPlaceHolderId = -1;
+        return Transport._binaryMultiPlaceHolderId--;
     }
 
     private _getNewCid(): number {
@@ -310,7 +312,7 @@ export default class Communicator {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
             if(typeof dataType === 'number') {
-                if(containsStreams(dataType) && !Communicator.chunksCanContainStreams)
+                if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
                     throw new Error('Streams in chunks are not allowed.');
                 stream._addChunkToChain(this._processData(dataType,data),dataType);
             }
@@ -321,7 +323,7 @@ export default class Communicator {
     private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
-            if(containsStreams(dataType) && !Communicator.chunksCanContainStreams)
+            if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
                 throw new Error('Streams in chunks are not allowed.');
             stream._addChunkToChain(this._processData(dataType,data),dataType);
         }
@@ -343,13 +345,16 @@ export default class Communicator {
     private _processInvoke(caller: InvokeListener, event: any, callId: number, data: any, dataType: DataType) {
         let called;
         try {
+            const badConnectionTimestamp = this.badConnectionTimestamp;
             caller(event, data,(data, processComplexTypes) => {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
+                if(badConnectionTimestamp !== this.badConnectionTimestamp) return;
                 this._sendInvokeDataResp(callId, data, processComplexTypes);
             }, (err) => {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
+                if(badConnectionTimestamp !== this.badConnectionTimestamp) return;
                 this.send(PacketType.InvokeErrResp + ',' +
                     callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err)))
                 );
@@ -358,12 +363,19 @@ export default class Communicator {
         catch(err) {this._onListenerError(err);}
     }
 
+    /**
+     * Only use when the connection was not lost in-between time.
+     * @param callId
+     * @param data
+     * @param processComplexTypes
+     * @private
+     */
     private _sendInvokeDataResp(callId: number, data: any, processComplexTypes?: boolean) {
         if(!processComplexTypes) {
             this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
-        else if(data instanceof WriteStream && Communicator.streamsEnabled){
+        else if(data instanceof WriteStream && Transport.streamsEnabled){
             const streamId = this._getNewStreamId();
             this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.Stream + ',' + streamId);
@@ -373,7 +385,7 @@ export default class Communicator {
             const binaryId = this._getNewBinaryPlaceholderId();
             this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.Binary + ',' + binaryId);
-            this.send(Communicator._createBinaryReferencePacket(binaryId,data));
+            this.send(Transport._createBinaryReferencePacket(binaryId,data));
         }
         else {
             const packets: (string | ArrayBuffer)[] = [];
@@ -397,7 +409,7 @@ export default class Communicator {
             const promises: Promise<any>[] = [];
             const wrapper = [data];
             this._resolveMixedJSONDeep(wrapper, 0, promises, {
-                parseStreams: Communicator.streamsEnabled &&
+                parseStreams: Transport.streamsEnabled &&
                     (type === DataType.JSONWithStreams || type === DataType.JSONWithStreamsAndBinary),
                 parseBinaries: type === DataType.JSONWithBinaries || type === DataType.JSONWithStreamsAndBinary
             });
@@ -405,9 +417,9 @@ export default class Communicator {
                 await Promise.all(promises);
                 resolve(wrapper[0]);
             });
-        } else if(type === DataType.Stream && Communicator.streamsEnabled) {
+        } else if(type === DataType.Stream && Transport.streamsEnabled) {
             if(typeof data !== 'number') throw new Error('StreamId is not a number.');
-            return new Communicator.readStream(data,this);
+            return new Transport.readStream(data,this);
         }
         else throw new Error('Invalid data type.');
     }
@@ -421,7 +433,7 @@ export default class Communicator {
                 timeout: setTimeout(() => {
                     delete this._binaryResolver[id];
                     reject(new TimeoutError(`Binary placeholder: ${id} not resolved in time.`,TimeoutType.BinaryResolve));
-                }, Communicator.binaryResolveTimeout)
+                }, Transport.binaryResolveTimeout)
             };
         });
     }
@@ -438,7 +450,7 @@ export default class Communicator {
             }
             else  {
                 if(options.parseBinaries && typeof value['__binary__'] === 'number'){
-                    if(binaryResolverPromises.length >= Communicator.packetBinaryResolverLimit)
+                    if(binaryResolverPromises.length >= Transport.packetBinaryResolverLimit)
                         throw new Error('Max binary resolver limit reached.')
                     binaryResolverPromises.push(new Promise(async (resolve) => {
                         // noinspection JSUnfilteredForInLoop
@@ -447,10 +459,10 @@ export default class Communicator {
                     }));
                 }
                 else if(options.parseStreams && typeof value['__stream__'] === 'number'){
-                    if(meta.streamCount >= Communicator.packetStreamLimit)
+                    if(meta.streamCount >= Transport.packetStreamLimit)
                         throw new Error('Max stream limit reached.')
                     meta.streamCount++;
-                    obj[key] = new Communicator.readStream(value['__stream__'],this);
+                    obj[key] = new Transport.readStream(value['__stream__'],this);
                 }
                 else for(const key in value) this._resolveMixedJSONDeep(value, key, binaryResolverPromises, options);
             }
@@ -469,11 +481,11 @@ export default class Communicator {
         if(typeof data === 'object' && data){
             if(data instanceof ArrayBuffer){
                 const placeholderId = this._getNewBinaryPlaceholderId();
-                binaryReferencePackets.push(Communicator._createBinaryReferencePacket(placeholderId, data));
+                binaryReferencePackets.push(Transport._createBinaryReferencePacket(placeholderId, data));
                 return {__binary__: placeholderId};
             }
             else if(data instanceof WriteStream){
-                if(Communicator.streamsEnabled){
+                if(Transport.streamsEnabled){
                     const streamId = this._getNewStreamId();
                     data._init(this,streamId);
                     streamClosed.push(data.closed);
@@ -543,8 +555,8 @@ export default class Communicator {
 
     /**
      * @internal
-     * @param writeStream
      * @private
+     * @param id
      */
     _removeWriteStream(id: number) {
         delete this._activeWriteStreams[id];
@@ -562,25 +574,28 @@ export default class Communicator {
     //Send
     // noinspection JSMethodCanBeStatic
     private compressPreparedPackages(preparedPackets: PreparedPackage[]): PreparedPackage {
-        const binaryPackets: PreparedPackage = [];
-        let textPackets: string = '';
+        const binaryPackets: PreparedPackage = [], stringPackets: string[] = [], len = preparedPackets.length;
+        let tmpStringPacket = '', tmpPackets: PreparedPackage;
 
-        const len = preparedPackets.length;
-        let tmpPackets: PreparedPackage;
         for(let i = 0; i < len; i++) {
             tmpPackets = preparedPackets[i];
             for(let j = 0; j < tmpPackets.length; j++){
-                if(typeof tmpPackets[j] === 'string')
-                    textPackets += ('[' + tmpPackets[j] + '],');
+                if(typeof tmpPackets[j] === 'string') {
+                    if((tmpStringPacket.length + (tmpPackets[j] as string).length) > this.limitBatchPackageLength) {
+                        stringPackets.push(PacketType.Bundle +
+                            ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']');
+                        tmpStringPacket = '';
+                    }
+                    tmpStringPacket += ('[' + tmpPackets[j] + '],');
+                }
                 else binaryPackets.push(tmpPackets[j]);
             }
         }
+        if(tmpStringPacket.length)
+            stringPackets.push(PacketType.Bundle +
+                ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']');
 
-        if(textPackets.length > 0) {
-            return [PacketType.Bundle + ',[' + textPackets.substring(0, textPackets.length - 1) + ']'
-                ,...binaryPackets];
-        }
-        return binaryPackets;
+        return stringPackets.length ? [...stringPackets,...binaryPackets] : binaryPackets;
     }
 
     /**
@@ -592,13 +607,14 @@ export default class Communicator {
      * is lost and send them when the socket is connected again.
      * @param event
      * @param data
+     * @param processComplexTypes
      */
     prepareTransmit(event: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
         if(!processComplexTypes) {
             return [PacketType.Transmit + ',"' + event + '",' +
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
-        else if(data instanceof WriteStream && Communicator.streamsEnabled){
+        else if(data instanceof WriteStream && Transport.streamsEnabled){
             const streamId = this._getNewStreamId();
             const packet: PreparedPackage = [PacketType.Transmit + ',"' + event + '",' +
                 DataType.Stream + ',' + streamId];
@@ -608,7 +624,7 @@ export default class Communicator {
         else if(data instanceof ArrayBuffer) {
             const binaryId = this._getNewBinaryPlaceholderId();
             return [PacketType.Transmit + ',"' + event + '",' +
-                DataType.Binary + ',' + binaryId, Communicator._createBinaryReferencePacket(binaryId,data)];
+                DataType.Binary + ',' + binaryId, Transport._createBinaryReferencePacket(binaryId,data)];
         }
         else {
             const preparedPackage: PreparedPackage = [];
@@ -631,6 +647,8 @@ export default class Communicator {
      * @param event
      * @param data
      * @param ackTimeout
+     * @param processComplexTypes
+     * @param returnDataType
      */
     prepareInvoke<RDT extends true | false | undefined>(
         event: string,
@@ -650,17 +668,17 @@ export default class Communicator {
                     this._invokeResponsePromises[callId].timeout = setTimeout(() => {
                         delete this._invokeResponsePromises[callId];
                         reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
-                    }, ackTimeout || this.ackTimeout || Communicator.ackTimeout);
+                    }, ackTimeout || this.ackTimeout || Transport.ackTimeout);
             }
         });
 
         if(!processComplexTypes) {
-            preparedPackage._beforeSend = setResponseTimeout;
+            preparedPackage._afterSend = setResponseTimeout;
             preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
         }
-        else if(data instanceof WriteStream && Communicator.streamsEnabled){
+        else if(data instanceof WriteStream && Transport.streamsEnabled){
             const streamId = this._getNewStreamId();
             preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
                 DataType.Stream + ',' + streamId;
@@ -669,11 +687,11 @@ export default class Communicator {
             return preparedPackage;
         }
         else if(data instanceof ArrayBuffer) {
-            preparedPackage._beforeSend = setResponseTimeout;
+            preparedPackage._afterSend = setResponseTimeout;
             const binaryId = this._getNewBinaryPlaceholderId();
             preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
                 DataType.Binary + ',' + binaryId;
-            preparedPackage[1] = Communicator._createBinaryReferencePacket(binaryId,data);
+            preparedPackage[1] = Transport._createBinaryReferencePacket(binaryId,data);
             return preparedPackage;
         }
         else {
@@ -681,7 +699,7 @@ export default class Communicator {
             const streams = [];
             data = this._processMixedJSONDeep(data,preparedPackage,streams);
             if(streams.length > 0) Promise.all(streams).then(setResponseTimeout)
-            else preparedPackage._beforeSend = setResponseTimeout;
+            else preparedPackage._afterSend = setResponseTimeout;
             preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
                 parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
@@ -691,26 +709,32 @@ export default class Communicator {
 
     // noinspection JSUnusedGlobalSymbols
     sendPreparedPackage(preparedPackage: PreparedPackage, batchTimeLimit?: number): void {
-        if(batchTimeLimit) this._addToBatchList(preparedPackage,batchTimeLimit)
-        else this._sendPreparedPackage(preparedPackage);
+        if(!this._open) this._buffer.push(preparedPackage);
+        else if(batchTimeLimit) this._addBatchPackage(preparedPackage,batchTimeLimit);
+        else this._directSendPreparedPackage(preparedPackage);
     }
 
     // noinspection JSUnusedGlobalSymbols
     async sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batchTimeLimit?: number): Promise<void> {
         if(batchTimeLimit) {
-            return new Promise((resolve, reject) => {
-                this._badConnectionOnceListener.push(reject);
+            return new Promise((resolve) => {
                 const tmpAfterSend = preparedPackage._afterSend;
                 preparedPackage._afterSend = () => {
-                    const listenerIndex = this._badConnectionOnceListener.indexOf(reject);
-                    if(listenerIndex !== -1) this._badConnectionOnceListener.splice(listenerIndex, 1);
                     if(tmpAfterSend) tmpAfterSend();
                     resolve();
                 }
-                this._addToBatchList(preparedPackage,batchTimeLimit);
+                this._addBatchPackage(preparedPackage,batchTimeLimit);
             })
         }
-        else this._sendPreparedPackage(preparedPackage);
+        else if(this._open) this._directSendPreparedPackage(preparedPackage);
+        else return new Promise((resolve) => {
+            const tmpAfterSend = preparedPackage._afterSend;
+            preparedPackage._afterSend = () => {
+                if(tmpAfterSend) tmpAfterSend();
+                resolve();
+            }
+            this._buffer.push(preparedPackage);
+        })
     }
 
     // noinspection JSUnusedGlobalSymbols
@@ -730,18 +754,19 @@ export default class Communicator {
 
     // noinspection JSUnusedGlobalSymbols
     sendPing() {
+        if(!this._open) return;
         this.send(PING_BINARY);
     }
 
     // noinspection JSUnusedGlobalSymbols
     sendPong() {
+        if(!this._open) return;
         this.send(PONG_BINARY);
     }
 
-    private _sendPreparedPackage(preparedPackage: PreparedPackage) {
-        if(preparedPackage._beforeSend) preparedPackage._beforeSend();
+    private _directSendPreparedPackage(preparedPackage: PreparedPackage) {
         if(preparedPackage.length === 1) this.send(preparedPackage[0])
-        else for(let i = 0; i < preparedPackage.length; i++) this.send(preparedPackage[i]);
+        else for(let i = 0, len = preparedPackage.length; i < len; i++) this.send(preparedPackage[i]);
         if(preparedPackage._afterSend) preparedPackage._afterSend();
     }
 
@@ -751,74 +776,84 @@ export default class Communicator {
      * The returned boolean indicates if it was successfully cancelled.
      * @param preparedPackage
      */
-    public cancelBatchPackage(preparedPackage: PreparedPackage): boolean {
-        const index = this._batchSendList.indexOf(preparedPackage);
+    public tryCancelPackage(preparedPackage: PreparedPackage): boolean {
+        const index = this._buffer.indexOf(preparedPackage);
         if(index !== -1) {
-            this._batchSendList.splice(index,1);
-            if(this._batchSendList.length === 0 && this._batchTimeoutTicker) {
-                clearTimeout(this._batchTimeoutTicker);
-                this._batchTimeoutTicker = undefined;
+            this._buffer.splice(index,1);
+            if(this._buffer.length === 0 && this._bufferTimeoutTicker) {
+                clearTimeout(this._bufferTimeoutTicker);
+                this._bufferTimeoutTicker = undefined;
             }
             return true;
         }
         return false;
     }
 
-    private _addToBatchList(preparedPackage: PreparedPackage, batchTimeLimit: number) {
-        this._batchSendList.push(preparedPackage);
-        if(this._batchTimeoutTicker) {
-            if((this._batchTimeoutDelay! - Date.now() + this._batchTimeoutTimestamp!) > batchTimeLimit){
-                clearTimeout(this._batchTimeoutTicker);
-                this._setBatchTimeout(batchTimeLimit);
+    private _addBatchPackage(preparedPackage: PreparedPackage, batchTimeLimit: number) {
+        this._buffer.push(preparedPackage);
+        if(this._bufferTimeoutTicker) {
+            if((this._bufferTimeoutDelay! - Date.now() + this._bufferTimeoutTimestamp!) > batchTimeLimit){
+                clearTimeout(this._bufferTimeoutTicker);
+                this._setBufferTimeout(batchTimeLimit);
             }
         }
-        else this._setBatchTimeout(batchTimeLimit);
+        else this._setBufferTimeout(batchTimeLimit);
     }
 
     // noinspection JSUnusedGlobalSymbols
-    public flushBatchBuffer() {
-        if(this._batchTimeoutTicker) {
-            clearTimeout(this._batchTimeoutTicker);
-            this._batchTimeoutTicker = undefined;
-        }
-        this._flushBatch();
+    public flushBuffer() {
+        this._clearBufferTimeout();
+        this._flushBuffer();
+    }
+
+    // noinspection JSUnusedGlobalSymbols
+    public clearBuffer() {
+        this._buffer = [];
     }
 
     private _onBatchTimeout = () => {
-        this._batchTimeoutTicker = undefined;
-        this._flushBatch();
+        this._bufferTimeoutTicker = undefined;
+        this._flushBuffer();
     }
 
-    private _flushBatch() {
-        const batchPackages = this._batchSendList;
-        this._batchSendList = [];
-        const compressPackage = this.compressPreparedPackages(batchPackages);
-        const listLength = batchPackages.length;
-        try {
-            let tmpPreparedPackages: PreparedPackage;
-            for(let i = 0; i < listLength; i++) {
-                tmpPreparedPackages = batchPackages[i];
-                if(tmpPreparedPackages._beforeSend) tmpPreparedPackages._beforeSend();
-            }
-            for(let i = 0; i < compressPackage.length; i++){this.send(compressPackage[i]);}
-            for(let i = 0; i < listLength; i++) {
-                tmpPreparedPackages = batchPackages[i];
-                if(tmpPreparedPackages._afterSend) tmpPreparedPackages._afterSend();
-            }
+    private _flushBuffer() {
+        if(!this._open) return;
+        const packages = this._buffer;
+        this._buffer = [];
+        if(packages.length <= (this.maxBufferChunkLength || Transport.maxBufferChunkLength))
+            this._sendBufferChunk(packages);
+        else {
+            const chunkLength = (this.maxBufferChunkLength || Transport.maxBufferChunkLength);
+            for (let i = 0,len = packages.length; i < len; i += chunkLength)
+                this._sendBufferChunk(packages.slice(i, i + chunkLength))
         }
-        catch (err) {}
     }
 
-    private _setBatchTimeout(ms: number) {
-        this._batchTimeoutTicker = setTimeout(this._onBatchTimeout,ms);
-        this._batchTimeoutTimestamp = Date.now();
-        this._batchTimeoutDelay = ms;
+    private _sendBufferChunk(packages: PreparedPackage[]) {
+        const compressPackage = this.compressPreparedPackages(packages), listLength = packages.length;
+        for(let i = 0; i < compressPackage.length; i++) this.send(compressPackage[i]);
+        for(let i = 0; i < listLength; i++) if(packages[i]._afterSend) packages[i]._afterSend!();
+    }
+
+    private _clearBufferTimeout() {
+        if(this._bufferTimeoutTicker) {
+            clearTimeout(this._bufferTimeoutTicker);
+            this._bufferTimeoutTicker = undefined;
+        }
+    }
+
+    private _setBufferTimeout(ms: number) {
+        this._bufferTimeoutTicker = setTimeout(this._onBatchTimeout,ms);
+        this._bufferTimeoutTimestamp = Date.now();
+        this._bufferTimeoutDelay = ms;
     }
 
     /**
+     * Only use when the connection was not lost in-between time.
      * @internal
      * @param streamId
      * @param data
+     * @param processComplexTypes
      * @private
      */
     _sendStreamChunk(streamId: number, data: any, processComplexTypes?: boolean) {
@@ -826,13 +861,13 @@ export default class Communicator {
             this.send(PacketType.StreamChunk + ',' + streamId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
-        else if(Communicator.chunksCanContainStreams && data instanceof WriteStream){
+        else if(Transport.chunksCanContainStreams && data instanceof WriteStream){
             const streamId = this._getNewStreamId();
             this.send(PacketType.StreamChunk + ',' + streamId + ',' +
                 DataType.Stream + ',' + streamId);
             data._init(this,streamId);
         }
-        else if(data instanceof ArrayBuffer) this.send(Communicator._createBinaryStreamChunkPacket(streamId,data));
+        else if(data instanceof ArrayBuffer) this.send(Transport._createBinaryStreamChunkPacket(streamId,data));
         else {
             const packets: (string | ArrayBuffer)[] = [];
             const streams: any[] = [];
@@ -855,6 +890,7 @@ export default class Communicator {
     }
 
     /**
+     * Only use when the connection was not lost in-between time.
      * @internal
      * @param streamId
      * @private
@@ -864,6 +900,7 @@ export default class Communicator {
     }
 
     /**
+     * Only use when the connection was not lost in-between time.
      * @internal
      * @param streamId
      * @param code
@@ -874,10 +911,12 @@ export default class Communicator {
     }
 
     /**
+     * Only use when the connection was not lost in-between time.
      * @internal
      * @param streamId
+     * @param code
      * @param data
-     * @param complexData
+     * @param processComplexTypes
      * @private
      */
     _sendWriteStreamClose(streamId: number, code: number, data?: any, processComplexTypes?: boolean) {
@@ -887,13 +926,13 @@ export default class Communicator {
                 this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
                     DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
             }
-            else if(Communicator.chunksCanContainStreams && data instanceof WriteStream){
+            else if(Transport.chunksCanContainStreams && data instanceof WriteStream){
                 const streamId = this._getNewStreamId();
                 this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
                     DataType.Stream + ',' + streamId);
                 data._init(this,streamId);
             }
-            else if(data instanceof ArrayBuffer) this.send(Communicator._createBinaryWriteStreamClosePacket(streamId, code, data));
+            else if(data instanceof ArrayBuffer) this.send(Transport._createBinaryWriteStreamClosePacket(streamId, code, data));
             else {
                 const packets: (string | ArrayBuffer)[] = [];
                 const streams: any[] = [];
@@ -926,6 +965,7 @@ export default class Communicator {
      * After preparing you should not wait a long time to send the package to the targets.
      * @param event
      * @param data
+     * @param processComplexTypes
      */
     public static prepareMultiTransmit(event: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
         if(!processComplexTypes) {
@@ -933,14 +973,14 @@ export default class Communicator {
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
         else if(data instanceof ArrayBuffer) {
-            const binaryId = Communicator._getNewBinaryMultiPlaceholderId();
+            const binaryId = Transport._getNewBinaryMultiPlaceholderId();
             return [PacketType.Transmit + ',"' + event + '",' +
-                DataType.Binary + ',' + binaryId, Communicator._createBinaryReferencePacket(binaryId,data)];
+                DataType.Binary + ',' + binaryId, Transport._createBinaryReferencePacket(binaryId,data)];
         }
         else {
             const preparedPackage: PreparedPackage = [];
             preparedPackage.length = 1;
-            data = Communicator._processMultiMixedJSONDeep(data,preparedPackage);
+            data = Transport._processMultiMixedJSONDeep(data,preparedPackage);
             preparedPackage[0] = PacketType.Transmit + ',"' + event + '",' +
                 parseJSONDataType(preparedPackage.length > 1,false) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
@@ -951,15 +991,15 @@ export default class Communicator {
     private static _processMultiMixedJSONDeep(data: any, binaryReferencePackets: any[]) {
         if(typeof data === 'object' && data){
             if(data instanceof ArrayBuffer){
-                const placeholderId = Communicator._getNewBinaryMultiPlaceholderId();
-                binaryReferencePackets.push(Communicator._createBinaryReferencePacket(placeholderId, data));
+                const placeholderId = Transport._getNewBinaryMultiPlaceholderId();
+                binaryReferencePackets.push(Transport._createBinaryReferencePacket(placeholderId, data));
                 return {__binary__: placeholderId};
             }
             else if(Array.isArray(data)) {
                 const newArray: any[] = [];
                 const len = data.length;
                 for (let i = 0; i < len; i++) {
-                    newArray[i] = Communicator._processMultiMixedJSONDeep(data[i], binaryReferencePackets);
+                    newArray[i] = Transport._processMultiMixedJSONDeep(data[i], binaryReferencePackets);
                 }
                 return newArray;
             }
@@ -967,7 +1007,7 @@ export default class Communicator {
                 const clone = {};
                 for(const key in data) {
                     // noinspection JSUnfilteredForInLoop
-                    clone[key] = Communicator._processMultiMixedJSONDeep(data[key], binaryReferencePackets);
+                    clone[key] = Transport._processMultiMixedJSONDeep(data[key], binaryReferencePackets);
                 }
                 return clone;
             }
