@@ -1,6 +1,6 @@
 {
-  "name": "ziron-communicator",
-  "description": "The protocol implementation that Ziron server and client uses.",
+  "name": "ziron-engine",
+  "description": "The Ziron typescript engine that handles sending of transmits and invokes.",
   "version": "0.2.5",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
