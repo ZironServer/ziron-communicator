@@ -792,7 +792,7 @@ export default class Transport {
     private _addBatchPackage(preparedPackage: PreparedPackage, batchTimeLimit: number) {
         this._buffer.push(preparedPackage);
         if(this._bufferTimeoutTicker) {
-            if((this._bufferTimeoutDelay! - Date.now() + this._bufferTimeoutTimestamp!) > batchTimeLimit){
+            if(((this._bufferTimeoutDelay! - Date.now()) + this._bufferTimeoutTimestamp!) > batchTimeLimit){
                 clearTimeout(this._bufferTimeoutTicker);
                 this._setBufferTimeout(batchTimeLimit);
             }
