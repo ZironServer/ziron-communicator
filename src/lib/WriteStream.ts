@@ -41,9 +41,9 @@ export default class WriteStream {
      * @internal
      * @private
      */
-    _init(communicator: Transport, id: number) {
+    _init(transport: Transport, id: number) {
         if(this.state !== StreamState.Unused) throw new Error('Write-stream already used.');
-        this._transport = communicator;
+        this._transport = transport;
         this._id = id;
         (this as Writable<WriteStream>).state = StreamState.Pending;
         this._transport._addWriteStream(id,this);

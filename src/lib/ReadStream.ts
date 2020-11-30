@@ -158,13 +158,13 @@ export default class ReadStream {
     /**
      * @internal
      */
-    _close(code: StreamCloseCode | number, rmFromCommunicator: boolean = true) {
+    _close(code: StreamCloseCode | number, rmFromTransport: boolean = true) {
         if(this.state === StreamState.Closed) return;
         (this as Writable<ReadStream>).state = StreamState.Closed;
         (this as Writable<ReadStream>).closedCode = code;
         this._chainClosed = true;
         if(this._receiveTimeoutActive) clearTimeout(this._receiveTimeoutTick);
-        if(rmFromCommunicator) this._transport._removeReadStream(this.id);
+        if(rmFromTransport) this._transport._removeReadStream(this.id);
         try {this.onClose(code);}
         catch(err) {this._onListenerError(err)}
         this._closedPromiseResolve();

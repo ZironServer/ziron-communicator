@@ -958,9 +958,9 @@ export default class Transport {
 
     /**
      * @description
-     * Creates a prepared transmit package that can be sent to multiple communicators
-     * but not multiple times to the same communicator (except there is no binary data in the package).
-     * This is extremely efficient when sending to a lot of communicators.
+     * Creates a prepared transmit package that can be sent to multiple transporters
+     * but not multiple times to the same transport (except there is no binary data in the package).
+     * This is extremely efficient when sending to a lot of transporters.
      * Notice that streams are not supported but binaries are supported.
      * After preparing you should not wait a long time to send the package to the targets.
      * @param event
