@@ -2,7 +2,7 @@ import {
   analyseTypeofData,
   BadConnectionError,
   BadConnectionType,
-  Communicator,
+  Transport,
   DataType,
   JSONString,
   PreparedPackage,
@@ -14,22 +14,22 @@ import {
 } from './../src/index';
 import {expect} from 'chai';
 
-const comA1 = new Communicator({
+const comA1 = new Transport({
   onInvalidMessage: (err) => console.error('A1: Invalid meessage: ', err),
   onListenerError: (err) => console.error('A1: Listener err: ', err),
-});
-const comB1 = new Communicator({
+},true);
+const comB1 = new Transport({
   onInvalidMessage: (err) => console.error('B1: Invalid meessage: ', err),
   onListenerError: (err) => console.error('B1: Listener err: ', err),
-});
-const comA2 = new Communicator({
+},true);
+const comA2 = new Transport({
   onInvalidMessage: (err) => console.error('A2: Invalid meessage: ', err),
   onListenerError: (err) => console.error('A2: Listener err: ', err),
-});
-const comB2 = new Communicator({
+},true);
+const comB2 = new Transport({
   onInvalidMessage: (err) => console.error('B2: Invalid meessage: ', err),
   onListenerError: (err) => console.error('B2: Listener err: ', err),
-});
+},true);
 
 //connect
 comA1.send = comB1.emitMessage.bind(comB1);
@@ -206,7 +206,7 @@ describe('Ziron', () => {
     });
 
     it('All batch transmits should be received.', (done) => {
-      const count = 10;
+      const count = 43;
 
       let receivedI = 0;
       comB1.onTransmit = (event,data) => {
@@ -216,9 +216,12 @@ describe('Ziron', () => {
         if(receivedI === count) done();
       };
 
+      comA1.maxBufferChunkLength = 5
+      comA1.limitBatchPackageLength = 2
       for(let i = 0; i < count; i++){
         comA1.transmit('batch','msg',{batchTimeLimit: 50});
       }
+      comA1.maxBufferChunkLength = undefined;
     });
 
     it('Should not send cancelled batch packages.', (done) => {
@@ -231,10 +234,10 @@ describe('Ziron', () => {
 
       const packages: PreparedPackage[] = [];
       for(let i = 0; i < count; i++){
-        packages.push(Communicator.prepareMultiTransmit('batch','msg'));
+        packages.push(Transport.prepareMultiTransmit('batch','msg'));
         comA1.sendPreparedPackage(packages[i],10);
       }
-      packages.forEach(pack => comA1.cancelBatchPackage(pack));
+      packages.forEach(pack => comA1.tryCancelPackage(pack));
 
       setTimeout(() => {
         expect(receivedI).to.be.equal(0);
@@ -255,6 +258,7 @@ describe('Ziron', () => {
         data.onClose = (code) => {
           expect(code).to.be.equal(StreamCloseCode.BadConnection);
           done();
+          comB1.emitOpen();
         };
         data.accept();
       };
@@ -307,7 +311,7 @@ describe('Ziron', () => {
           });
         }));
 
-        const prepPackage = Communicator.prepareMultiTransmit('person',test.data,
+        const prepPackage = Transport.prepareMultiTransmit('person',test.data,
           {processComplexTypes: test.processComplexTypes});
         [comA1,comA2].forEach(c => c.sendPreparedPackage(prepPackage))
 
@@ -467,6 +471,7 @@ describe('Ziron', () => {
       comA1.invoke('?').catch(err => {
         expect(err).to.be.instanceof(BadConnectionError)
         done();
+        comA1.emitOpen();
       });
       comA1.emitBadConnection(BadConnectionType.Disconnect);
     });
