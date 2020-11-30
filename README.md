@@ -1,4 +1,4 @@
-# ziron-communicator
+# ziron-ts-engine
 This module is the implementation of the protocol that is used in the server and client of Ziron. 
 
 The protocol has two possible ways to communicate between two communicators and is blazing fast. 
