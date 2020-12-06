@@ -739,7 +739,7 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     invoke<RDT extends true | false | undefined>(event: string, data?: any, options:
-        {ackTimeout?: number | null, batchTimeLimit?: number,returnDataType?: RDT} & PreparePackageOptions = {}):
+        {ackTimeout?: number, batchTimeLimit?: number,returnDataType?: RDT} & PreparePackageOptions = {}):
         Promise<RDT extends true ? [any,DataType] : any>
     {
         const prePackage = this.prepareInvoke(event,data,options);
