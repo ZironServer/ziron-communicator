@@ -659,51 +659,67 @@ export default class Transport {
         const callId = this._getNewCid();
         const preparedPackage: PreparedInvokePackage = [] as any;
 
-        let setResponseTimeout: (() => void) | undefined = undefined;
-
-        preparedPackage.promise = new Promise<any>((resolve, reject) => {
-            this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
-            setResponseTimeout = () => {
-                if(this._invokeResponsePromises[callId] && this._invokeResponsePromises[callId].timeout === undefined)
+        if(!processComplexTypes) {
+            preparedPackage.promise = new Promise<any>((resolve, reject) => {
+                preparedPackage._afterSend = () => {
+                    this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
                     this._invokeResponsePromises[callId].timeout = setTimeout(() => {
                         delete this._invokeResponsePromises[callId];
                         reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
                     }, ackTimeout || this.ackTimeout || Transport.ackTimeout);
-            }
-        });
-
-        if(!processComplexTypes) {
-            preparedPackage._afterSend = setResponseTimeout;
+                }
+            });
             preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
         }
-        else if(data instanceof WriteStream && Transport.streamsEnabled){
-            const streamId = this._getNewStreamId();
-            preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
-                DataType.Stream + ',' + streamId;
-            data.closed.then(setResponseTimeout);
-            data._init(this,streamId);
-            return preparedPackage;
-        }
-        else if(data instanceof ArrayBuffer) {
-            preparedPackage._afterSend = setResponseTimeout;
-            const binaryId = this._getNewBinaryPlaceholderId();
-            preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
-                DataType.Binary + ',' + binaryId;
-            preparedPackage[1] = Transport._createBinaryReferencePacket(binaryId,data);
-            return preparedPackage;
-        }
         else {
-            preparedPackage.length = 1;
-            const streams = [];
-            data = this._processMixedJSONDeep(data,preparedPackage,streams);
-            if(streams.length > 0) Promise.all(streams).then(setResponseTimeout)
-            else preparedPackage._afterSend = setResponseTimeout;
-            preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
-                parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
-                (data !== undefined ? (',' + encodeJson(data)) : '');
-            return preparedPackage;
+            let setResponse: (() => void) | undefined = undefined;
+            let setResponseTimeout: (() => void) | undefined = undefined;
+            preparedPackage.promise = new Promise<any>((resolve, reject) => {
+                setResponse = () => {
+                    this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
+                }
+                setResponseTimeout = () => {
+                    if(this._invokeResponsePromises[callId] && this._invokeResponsePromises[callId].timeout === undefined)
+                        this._invokeResponsePromises[callId].timeout = setTimeout(() => {
+                            delete this._invokeResponsePromises[callId];
+                            reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
+                        }, ackTimeout || this.ackTimeout || Transport.ackTimeout);
+                }
+            });
+
+            if(data instanceof WriteStream && Transport.streamsEnabled){
+                preparedPackage._afterSend = setResponse;
+                const streamId = this._getNewStreamId();
+                preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
+                    DataType.Stream + ',' + streamId;
+                data.closed.then(setResponseTimeout);
+                data._init(this,streamId);
+                return preparedPackage;
+            }
+            else if(data instanceof ArrayBuffer) {
+                preparedPackage._afterSend = () => {
+                    setResponse!();
+                    setResponseTimeout!();
+                }
+                const binaryId = this._getNewBinaryPlaceholderId();
+                preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
+                    DataType.Binary + ',' + binaryId;
+                preparedPackage[1] = Transport._createBinaryReferencePacket(binaryId,data);
+                return preparedPackage;
+            }
+            else {
+                preparedPackage._afterSend = setResponse;
+                preparedPackage.length = 1;
+                const streams = [];
+                data = this._processMixedJSONDeep(data,preparedPackage,streams);
+                if(streams.length > 0) Promise.all(streams).then(setResponseTimeout)
+                preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
+                    parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
+                    (data !== undefined ? (',' + encodeJson(data)) : '');
+                return preparedPackage;
+            }
         }
     }
 
