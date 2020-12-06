@@ -770,14 +770,14 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     sendPing() {
-        if(!this._open) return;
-        this.send(PING_BINARY);
+        try {this.send(PING_BINARY);}
+        catch (_) {}
     }
 
     // noinspection JSUnusedGlobalSymbols
     sendPong() {
-        if(!this._open) return;
-        this.send(PONG_BINARY);
+        try {this.send(PONG_BINARY);}
+        catch (_) {}
     }
 
     private _directSendPreparedPackage(preparedPackage: PreparedPackage) {
