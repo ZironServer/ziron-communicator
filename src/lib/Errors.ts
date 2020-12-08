@@ -36,3 +36,11 @@ export class BadConnectionError extends Error {
         this.name = 'BadConnectionError';
     }
 }
+
+export class BackError extends Error {
+    public readonly code: number | string;
+    constructor(code: number | string,message?: string) {
+        super(message);
+        this.code = code;
+    }
+}
