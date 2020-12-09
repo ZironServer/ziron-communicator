@@ -219,7 +219,7 @@ describe('Ziron', () => {
       comA1.maxBufferChunkLength = 5
       comA1.limitBatchPackageLength = 2
       for(let i = 0; i < count; i++){
-        comA1.transmit('batch','msg',{batchTimeLimit: 50});
+        comA1.transmit('batch','msg',{batchTime: 50});
       }
       comA1.maxBufferChunkLength = undefined;
     });

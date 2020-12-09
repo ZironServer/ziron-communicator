@@ -724,22 +724,22 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    sendPreparedPackage(preparedPackage: PreparedPackage, batchTimeLimit?: number): void {
+    sendPreparedPackage(preparedPackage: PreparedPackage, batchTime?: number): void {
         if(!this._open) this._buffer.push(preparedPackage);
-        else if(batchTimeLimit) this._addBatchPackage(preparedPackage,batchTimeLimit);
+        else if(batchTime) this._addBatchPackage(preparedPackage,batchTime);
         else this._directSendPreparedPackage(preparedPackage);
     }
 
     // noinspection JSUnusedGlobalSymbols
-    async sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batchTimeLimit?: number): Promise<void> {
-        if(batchTimeLimit) {
+    async sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batchTime?: number): Promise<void> {
+        if(batchTime) {
             return new Promise((resolve) => {
                 const tmpAfterSend = preparedPackage._afterSend;
                 preparedPackage._afterSend = () => {
                     if(tmpAfterSend) tmpAfterSend();
                     resolve();
                 }
-                this._addBatchPackage(preparedPackage,batchTimeLimit);
+                this._addBatchPackage(preparedPackage,batchTime);
             })
         }
         else if(this._open) this._directSendPreparedPackage(preparedPackage);
@@ -755,17 +755,17 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     invoke<RDT extends true | false | undefined>(event: string, data?: any, options:
-        {ackTimeout?: number, batchTimeLimit?: number,returnDataType?: RDT} & PreparePackageOptions = {}):
+        {ackTimeout?: number, batchTime?: number,returnDataType?: RDT} & PreparePackageOptions = {}):
         Promise<RDT extends true ? [any,DataType] : any>
     {
         const prePackage = this.prepareInvoke(event,data,options);
-        this.sendPreparedPackage(prePackage,options.batchTimeLimit);
+        this.sendPreparedPackage(prePackage,options.batchTime);
         return prePackage.promise;
     }
 
     // noinspection JSUnusedGlobalSymbols
-    transmit(event: string, data?: any, options: {batchTimeLimit?: number} & PreparePackageOptions = {}) {
-        this.sendPreparedPackage(this.prepareTransmit(event,data,options),options.batchTimeLimit);
+    transmit(event: string, data?: any, options: {batchTime?: number} & PreparePackageOptions = {}) {
+        this.sendPreparedPackage(this.prepareTransmit(event,data,options),options.batchTime);
     }
 
     // noinspection JSUnusedGlobalSymbols
@@ -805,15 +805,15 @@ export default class Transport {
         return false;
     }
 
-    private _addBatchPackage(preparedPackage: PreparedPackage, batchTimeLimit: number) {
+    private _addBatchPackage(preparedPackage: PreparedPackage, batchTime: number) {
         this._buffer.push(preparedPackage);
         if(this._bufferTimeoutTicker) {
-            if(((this._bufferTimeoutDelay! - Date.now()) + this._bufferTimeoutTimestamp!) > batchTimeLimit){
+            if(((this._bufferTimeoutDelay! - Date.now()) + this._bufferTimeoutTimestamp!) > batchTime){
                 clearTimeout(this._bufferTimeoutTicker);
-                this._setBufferTimeout(batchTimeLimit);
+                this._setBufferTimeout(batchTime);
             }
         }
-        else this._setBufferTimeout(batchTimeLimit);
+        else this._setBufferTimeout(batchTime);
     }
 
     // noinspection JSUnusedGlobalSymbols
