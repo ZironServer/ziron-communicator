@@ -818,9 +818,12 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    public flushBuffer() {
+    public flushBuffer(): boolean {
         this._clearBufferTimeout();
-        this._flushBuffer();
+        return this._flushBuffer();
+    }
+
+    // noinspection JSUnusedGlobalSymbols
     }
 
     // noinspection JSUnusedGlobalSymbols
@@ -833,8 +836,8 @@ export default class Transport {
         this._flushBuffer();
     }
 
-    private _flushBuffer() {
-        if(!this._open) return;
+    private _flushBuffer(): boolean {
+        if(!this._open) return false;
         const packages = this._buffer;
         this._buffer = [];
         if(packages.length <= (this.maxBufferChunkLength || Transport.maxBufferChunkLength))
@@ -844,6 +847,7 @@ export default class Transport {
             for (let i = 0,len = packages.length; i < len; i += chunkLength)
                 this._sendBufferChunk(packages.slice(i, i + chunkLength))
         }
+        return true;
     }
 
     private _sendBufferChunk(packages: PreparedPackage[]) {
