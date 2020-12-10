@@ -15,7 +15,7 @@ import {decodeJson, encodeJson, JSONString} from "./JsonUtils";
 import ReadStream from "./ReadStream";
 import WriteStream from "./WriteStream";
 import {StreamCloseCode} from "./StreamCloseCode";
-import {Writable} from "./Utils";
+import {RESOLVED_PROMISE, Writable} from "./Utils";
 import {TimeoutError, TimeoutType, InvalidActionError, BadConnectionError, BadConnectionType} from "./Errors";
 
 export interface PreparePackageOptions {
@@ -731,7 +731,7 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    async sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batch?: number | true): Promise<void> {
+    sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batch?: number | true): Promise<void> {
         if(batch) {
             return new Promise((resolve) => {
                 const tmpAfterSend = preparedPackage._afterSend;
@@ -742,7 +742,7 @@ export default class Transport {
                 this._addBatchPackage(preparedPackage,batch);
             })
         }
-        else if(this._open) this._directSendPreparedPackage(preparedPackage);
+        else if(this._open) return this._directSendPreparedPackage(preparedPackage), RESOLVED_PROMISE;
         else return new Promise((resolve) => {
             const tmpAfterSend = preparedPackage._afterSend;
             preparedPackage._afterSend = () => {
