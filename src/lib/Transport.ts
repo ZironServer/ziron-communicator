@@ -824,6 +824,8 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
+    public getBufferSize(): number {
+        return this._buffer.length;
     }
 
     // noinspection JSUnusedGlobalSymbols
