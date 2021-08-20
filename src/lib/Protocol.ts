@@ -22,7 +22,7 @@ export const enum PacketType {
 /**
  * Indexes:
  * 0: PacketType
- * 1: Event
+ * 1: Receiver
  * 2: DataType
  * 3: Data
  */
@@ -31,7 +31,7 @@ export type TransmitPacket = [PacketType.Transmit,string,DataType,any];
 /**
  * Indexes:
  * 0: PacketType
- * 1: Event
+ * 1: Procedure
  * 2: CallId
  * 3: DataType
  * 4: Data
