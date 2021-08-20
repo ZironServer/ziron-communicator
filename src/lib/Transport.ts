@@ -27,8 +27,8 @@ export interface PreparePackageOptions {
     processComplexTypes?: boolean
 }
 
-export type TransmitListener = (event: any, data: any, type: DataType) => void | Promise<void>;
-export type InvokeListener = (event: any, data: any, end: (data?: any, processComplexTypes?: boolean) => void,
+export type TransmitListener = (receiver: string, data: any, type: DataType) => void | Promise<void>;
+export type InvokeListener = (procedure: string, data: any, end: (data?: any, processComplexTypes?: boolean) => void,
     reject: (err?: any) => void, type: DataType) => void | Promise<void>
 
 /**
@@ -255,8 +255,8 @@ export default class Transport {
         else this.onInvalidMessage(new Error('Unknown binary package header type.'))
     }
 
-    private _processTransmit(event: string,data: any,dataType: DataType) {
-        try {this.onTransmit(event,data,dataType)}
+    private _processTransmit(receiver: string,data: any,dataType: DataType) {
+        try {this.onTransmit(receiver,data,dataType)}
         catch(err) {this._onListenerError(err)}
     }
 
@@ -342,11 +342,11 @@ export default class Transport {
         }
     }
 
-    private _processInvoke(caller: InvokeListener, event: any, callId: number, data: any, dataType: DataType) {
+    private _processInvoke(caller: InvokeListener, procedure: any, callId: number, data: any, dataType: DataType) {
         let called;
         try {
             const badConnectionTimestamp = this.badConnectionTimestamp;
-            caller(event, data,(data, processComplexTypes) => {
+            caller(procedure, data,(data, processComplexTypes) => {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
                 if(badConnectionTimestamp !== this.badConnectionTimestamp) return;
@@ -605,25 +605,25 @@ export default class Transport {
      * packages before sending the prepared package.
      * It is perfect to prepare packages when the connection
      * is lost and send them when the socket is connected again.
-     * @param event
+     * @param receiver
      * @param data
      * @param processComplexTypes
      */
-    prepareTransmit(event: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
+    prepareTransmit(receiver: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
         if(!processComplexTypes) {
-            return [PacketType.Transmit + ',"' + event + '",' +
+            return [PacketType.Transmit + ',"' + receiver + '",' +
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
         else if(data instanceof WriteStream && Transport.streamsEnabled){
             const streamId = this._getNewStreamId();
-            const packet: PreparedPackage = [PacketType.Transmit + ',"' + event + '",' +
+            const packet: PreparedPackage = [PacketType.Transmit + ',"' + receiver + '",' +
                 DataType.Stream + ',' + streamId];
             data._init(this,streamId);
             return packet;
         }
         else if(data instanceof ArrayBuffer) {
             const binaryId = this._getNewBinaryPlaceholderId();
-            return [PacketType.Transmit + ',"' + event + '",' +
+            return [PacketType.Transmit + ',"' + receiver + '",' +
                 DataType.Binary + ',' + binaryId, Transport._createBinaryReferencePacket(binaryId,data)];
         }
         else {
@@ -631,7 +631,7 @@ export default class Transport {
             const streams: any[] = [];
             preparedPackage.length = 1;
             data = this._processMixedJSONDeep(data,preparedPackage,streams);
-            preparedPackage[0] = PacketType.Transmit + ',"' + event + '",' +
+            preparedPackage[0] = PacketType.Transmit + ',"' + receiver + '",' +
                 parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
@@ -644,14 +644,14 @@ export default class Transport {
      * packages before sending the prepared package.
      * It is perfect to prepare packages when the connection
      * is lost and send them when the socket is connected again.
-     * @param event
+     * @param procedure
      * @param data
      * @param ackTimeout
      * @param processComplexTypes
      * @param returnDataType
      */
     prepareInvoke<RDT extends true | false | undefined>(
-        event: string,
+        procedure: string,
         data?: any,
         {ackTimeout,processComplexTypes,returnDataType}: {ackTimeout?: number | null, returnDataType?: RDT} & PreparePackageOptions = {}
         ): PreparedInvokePackage<RDT extends true ? [any,DataType] : any>
@@ -669,7 +669,7 @@ export default class Transport {
                     }, ackTimeout || this.ackTimeout || Transport.ackTimeout);
                 }
             });
-            preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
+            preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
         }
@@ -692,7 +692,7 @@ export default class Transport {
             if(data instanceof WriteStream && Transport.streamsEnabled){
                 preparedPackage._afterSend = setResponse;
                 const streamId = this._getNewStreamId();
-                preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
+                preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                     DataType.Stream + ',' + streamId;
                 data.closed.then(setResponseTimeout);
                 data._init(this,streamId);
@@ -704,7 +704,7 @@ export default class Transport {
                     setResponseTimeout!();
                 }
                 const binaryId = this._getNewBinaryPlaceholderId();
-                preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
+                preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                     DataType.Binary + ',' + binaryId;
                 preparedPackage[1] = Transport._createBinaryReferencePacket(binaryId,data);
                 return preparedPackage;
@@ -715,7 +715,7 @@ export default class Transport {
                 const streams = [];
                 data = this._processMixedJSONDeep(data,preparedPackage,streams);
                 if(streams.length > 0) Promise.all(streams).then(setResponseTimeout)
-                preparedPackage[0] = PacketType.Invoke + ',"' + event + '",' + callId + ',' +
+                preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                     parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
                     (data !== undefined ? (',' + encodeJson(data)) : '');
                 return preparedPackage;
@@ -754,18 +754,18 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    invoke<RDT extends true | false | undefined>(event: string, data?: any, options:
+    invoke<RDT extends true | false | undefined>(procedure: string, data?: any, options:
         {ackTimeout?: number, batch?: number,returnDataType?: RDT} & PreparePackageOptions = {}):
         Promise<RDT extends true ? [any,DataType] : any>
     {
-        const prePackage = this.prepareInvoke(event,data,options);
+        const prePackage = this.prepareInvoke(procedure,data,options);
         this.sendPreparedPackage(prePackage,options.batch);
         return prePackage.promise;
     }
 
     // noinspection JSUnusedGlobalSymbols
-    transmit(event: string, data?: any, options: {batch?: number} & PreparePackageOptions = {}) {
-        this.sendPreparedPackage(this.prepareTransmit(event,data,options),options.batch);
+    transmit(receiver: string, data?: any, options: {batch?: number} & PreparePackageOptions = {}) {
+        this.sendPreparedPackage(this.prepareTransmit(receiver,data,options),options.batch);
     }
 
     // noinspection JSUnusedGlobalSymbols
@@ -986,25 +986,25 @@ export default class Transport {
      * This is extremely efficient when sending to a lot of transporters.
      * Notice that streams are not supported but binaries are supported.
      * After preparing you should not wait a long time to send the package to the targets.
-     * @param event
+     * @param receiver
      * @param data
      * @param processComplexTypes
      */
-    public static prepareMultiTransmit(event: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
+    public static prepareMultiTransmit(receiver: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
         if(!processComplexTypes) {
-            return [PacketType.Transmit + ',"' + event + '",' +
+            return [PacketType.Transmit + ',"' + receiver + '",' +
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
         else if(data instanceof ArrayBuffer) {
             const binaryId = Transport._getNewBinaryMultiPlaceholderId();
-            return [PacketType.Transmit + ',"' + event + '",' +
+            return [PacketType.Transmit + ',"' + receiver + '",' +
                 DataType.Binary + ',' + binaryId, Transport._createBinaryReferencePacket(binaryId,data)];
         }
         else {
             const preparedPackage: PreparedPackage = [];
             preparedPackage.length = 1;
             data = Transport._processMultiMixedJSONDeep(data,preparedPackage);
-            preparedPackage[0] = PacketType.Transmit + ',"' + event + '",' +
+            preparedPackage[0] = PacketType.Transmit + ',"' + receiver + '",' +
                 parseJSONDataType(preparedPackage.length > 1,false) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
