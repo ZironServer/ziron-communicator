@@ -263,8 +263,10 @@ export default class Transport {
     private async _processJsonActionPacket(packet: ActionPacket) {
         switch (packet['0']) {
             case PacketType.Transmit:
-                 return this._processTransmit(packet['1'],await this._processData(packet['2'],packet['3']),packet['2']);
+                if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
+                return this._processTransmit(packet['1'],await this._processData(packet['2'],packet['3']),packet['2']);
             case PacketType.Invoke:
+                if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
                 return this._processInvoke(this.onInvoke,packet['1'],packet['2'],
                     await this._processData(packet['3'],packet['4']),packet['3'])
@@ -342,7 +344,7 @@ export default class Transport {
         }
     }
 
-    private _processInvoke(caller: InvokeListener, procedure: any, callId: number, data: any, dataType: DataType) {
+    private _processInvoke(caller: InvokeListener, procedure: string, callId: number, data: any, dataType: DataType) {
         let called;
         try {
             const badConnectionTimestamp = this.badConnectionTimestamp;
