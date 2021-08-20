@@ -590,6 +590,14 @@ describe('Ziron', () => {
         invalid: false
       },
       {
+        msg: '1,10,0',
+        invalid: true
+      },
+      {
+        msg: '1,{},0',
+        invalid: true
+      },
+      {
         msg: '1,"someEvent",1',
         invalid: true
       },
