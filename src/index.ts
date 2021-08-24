@@ -10,7 +10,7 @@ import Transport, {
     TransmitListener,
     InvokeListener,
     PreparedPackage,
-    PreparePackageOptions
+    ComplexTypesOption
 } from "./lib/Transport";
 import ReadStream from "./lib/ReadStream";
 import {StreamCloseCode} from "./lib/StreamCloseCode";
@@ -43,7 +43,7 @@ export {
     TransmitListener,
     InvokeListener,
     PreparedPackage,
-    PreparePackageOptions,
+    ComplexTypesOption,
     hydrateError,
     dehydrateError,
     BackError

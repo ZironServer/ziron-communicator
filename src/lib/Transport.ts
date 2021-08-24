@@ -18,7 +18,7 @@ import {StreamCloseCode} from "./StreamCloseCode";
 import {RESOLVED_PROMISE, Writable} from "./Utils";
 import {TimeoutError, TimeoutType, InvalidActionError, BadConnectionError, BadConnectionType} from "./Errors";
 
-export interface PreparePackageOptions {
+export interface ComplexTypesOption {
     /**
      * Complex types are streams or array buffer.
      * If you want to send such types you need to activate this option.
@@ -611,7 +611,7 @@ export default class Transport {
      * @param data
      * @param processComplexTypes
      */
-    prepareTransmit(receiver: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
+    prepareTransmit(receiver: string, data?: any, {processComplexTypes}: ComplexTypesOption = {}): PreparedPackage {
         if(!processComplexTypes) {
             return [PacketType.Transmit + ',"' + receiver + '",' +
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
@@ -655,7 +655,7 @@ export default class Transport {
     prepareInvoke<RDT extends true | false | undefined>(
         procedure: string,
         data?: any,
-        {ackTimeout,processComplexTypes,returnDataType}: {ackTimeout?: number | null, returnDataType?: RDT} & PreparePackageOptions = {}
+        {ackTimeout,processComplexTypes,returnDataType}: {ackTimeout?: number | null, returnDataType?: RDT} & ComplexTypesOption = {}
         ): PreparedInvokePackage<RDT extends true ? [any,DataType] : any>
     {
         const callId = this._getNewCid();
@@ -757,7 +757,7 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     invoke<RDT extends true | false | undefined>(procedure: string, data?: any, options:
-        {ackTimeout?: number, batch?: number | true | null,returnDataType?: RDT} & PreparePackageOptions = {}):
+        {ackTimeout?: number, batch?: number | true | null,returnDataType?: RDT} & ComplexTypesOption = {}):
         Promise<RDT extends true ? [any,DataType] : any>
     {
         const prePackage = this.prepareInvoke(procedure,data,options);
@@ -766,7 +766,7 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    transmit(receiver: string, data?: any, options: {batch?: number | true | null} & PreparePackageOptions = {}) {
+    transmit(receiver: string, data?: any, options: {batch?: number | true | null} & ComplexTypesOption = {}) {
         this.sendPreparedPackage(this.prepareTransmit(receiver,data,options),options.batch);
     }
 
@@ -992,7 +992,7 @@ export default class Transport {
      * @param data
      * @param processComplexTypes
      */
-    public static prepareMultiTransmit(receiver: string, data?: any, {processComplexTypes}: PreparePackageOptions = {}): PreparedPackage {
+    public static prepareMultiTransmit(receiver: string, data?: any, {processComplexTypes}: ComplexTypesOption = {}): PreparedPackage {
         if(!processComplexTypes) {
             return [PacketType.Transmit + ',"' + receiver + '",' +
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
