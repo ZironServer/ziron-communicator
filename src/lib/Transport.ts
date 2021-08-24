@@ -726,14 +726,14 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    sendPreparedPackage(preparedPackage: PreparedPackage, batch?: number | true): void {
+    sendPreparedPackage(preparedPackage: PreparedPackage, batch?: number | true | null): void {
         if(!this._open) this._buffer.push(preparedPackage);
         else if(batch) this._addBatchPackage(preparedPackage,batch);
         else this._directSendPreparedPackage(preparedPackage);
     }
 
     // noinspection JSUnusedGlobalSymbols
-    sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batch?: number | true): Promise<void> {
+    sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batch?: number | true | null): Promise<void> {
         if(batch) {
             return new Promise((resolve) => {
                 const tmpAfterSend = preparedPackage._afterSend;
@@ -757,7 +757,7 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     invoke<RDT extends true | false | undefined>(procedure: string, data?: any, options:
-        {ackTimeout?: number, batch?: number,returnDataType?: RDT} & PreparePackageOptions = {}):
+        {ackTimeout?: number, batch?: number | true | null,returnDataType?: RDT} & PreparePackageOptions = {}):
         Promise<RDT extends true ? [any,DataType] : any>
     {
         const prePackage = this.prepareInvoke(procedure,data,options);
@@ -766,7 +766,7 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    transmit(receiver: string, data?: any, options: {batch?: number} & PreparePackageOptions = {}) {
+    transmit(receiver: string, data?: any, options: {batch?: number | true | null} & PreparePackageOptions = {}) {
         this.sendPreparedPackage(this.prepareTransmit(receiver,data,options),options.batch);
     }
 
