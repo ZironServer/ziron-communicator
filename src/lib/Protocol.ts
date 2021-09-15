@@ -11,12 +11,14 @@ export const enum PacketType {
     Transmit,
     Invoke,
     InvokeDataResp,
+    InvokeErrResp,
+    BinaryReference,
     StreamAccept,
     StreamChunk,
-    ReadStreamClose,
+    StreamLastChunk,
+    StreamDataPermission,
     WriteStreamClose,
-    BinaryReference,
-    InvokeErrResp
+    ReadStreamClose,
 }
 
 /**
@@ -42,14 +44,6 @@ export type InvokePacket = [PacketType.Invoke,string,number,DataType,any];
  * Indexes:
  * 0: PacketType
  * 1: CallId
- * 2: Err
- */
-export type InvokeErrRespPacket = [PacketType.InvokeErrResp,number,any];
-
-/**
- * Indexes:
- * 0: PacketType
- * 1: CallId
  * 2: DataType
  * 3: Data
  */
@@ -58,9 +52,18 @@ export type InvokeDataRespPacket = [PacketType.InvokeDataResp,number,DataType,an
 /**
  * Indexes:
  * 0: PacketType
- * 1: StreamId
+ * 1: CallId
+ * 2: Err
  */
-export type StreamAcceptPacket = [PacketType.StreamAccept,number];
+export type InvokeErrRespPacket = [PacketType.InvokeErrResp,number,any];
+
+/**
+ * Indexes:
+ * 0: PacketType
+ * 1: StreamId
+ * 2: Buffer size (size is also allowed)
+ */
+export type StreamAcceptPacket = [PacketType.StreamAccept,number,number];
 
 /**
  * Indexes:
@@ -75,21 +78,37 @@ export type StreamChunkPacket = [PacketType.StreamChunk,number,DataType,any];
  * Indexes:
  * 0: PacketType
  * 1: StreamId
- * 2: code
- * 3?: DataType
- * 4?: Data
+ * 2: DataType
+ * 3: Data
  */
-export type WriteStreamClosePacket = [PacketType.WriteStreamClose,number,number,DataType | undefined,any | undefined];
+export type StreamLastChunkPacket = [PacketType.StreamLastChunk,number,DataType,any];
 
 /**
  * Indexes:
  * 0: PacketType
  * 1: StreamId
- * 2: code
+ * 2: Allowed size
  */
-export type ReadStreamClosePacket = [PacketType.ReadStreamClose,number,number];
+export type StreamDataPermissionPacket = [PacketType.StreamDataPermission,number,number];
+
+/**
+ * Indexes:
+ * 0: PacketType
+ * 1: StreamId
+ * 2: Error code
+ */
+export type WriteStreamClosePacket = [PacketType.WriteStreamClose,number,number];
+
+/**
+ * Indexes:
+ * 0: PacketType
+ * 1: StreamId
+ * 2: Error code
+ */
+export type ReadStreamClosePacket = [PacketType.ReadStreamClose,number,number?];
 
 export type ActionPacket = TransmitPacket | InvokePacket | InvokeErrRespPacket |
-    InvokeDataRespPacket | StreamAcceptPacket | StreamChunkPacket |
+    InvokeDataRespPacket | StreamAcceptPacket | StreamDataPermissionPacket |
+    StreamChunkPacket | StreamLastChunkPacket |
     WriteStreamClosePacket | ReadStreamClosePacket ;
 export type BundlePacket = [PacketType.Bundle,ActionPacket[]];
