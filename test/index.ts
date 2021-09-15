@@ -13,6 +13,9 @@ import {
   WriteStream
 } from './../src/index';
 import {expect} from 'chai';
+import * as chai from 'chai';
+import * as chaiAsPromised from 'chai-as-promised';
+chai.use(chaiAsPromised);
 
 const comA1 = new Transport({
   onInvalidMessage: (err) => console.error('A1: Invalid meessage: ', err),
