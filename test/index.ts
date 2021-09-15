@@ -2,20 +2,22 @@ import {
   analyseTypeofData,
   BadConnectionError,
   BadConnectionType,
-  Transport,
   DataType,
   JSONString,
-  PreparedPackage,
   ReadStream,
-  StreamCloseCode,
+  StreamErrorCloseCode, StreamCloseError,
   StreamState,
+  WriteStream,
+  PreparedPackage,
   TimeoutError,
-  WriteStream
+  Transport
 } from './../src/index';
 import {expect} from 'chai';
 import * as chai from 'chai';
 import * as chaiAsPromised from 'chai-as-promised';
 chai.use(chaiAsPromised);
+
+import LinkedBuffer from "../src/lib/streams/LinkedBuffer";
 
 const comA1 = new Transport({
   onInvalidMessage: (err) => console.error('A1: Invalid meessage: ', err),
@@ -41,7 +43,36 @@ comB1.send = comA1.emitMessage.bind(comA1);
 comA2.send = comB2.emitMessage.bind(comB2);
 comB2.send = comA2.emitMessage.bind(comA2);
 
+function concatenateBuffer(...arrays: ArrayBuffer[]): ArrayBuffer {
+  const size = arrays.reduce((a,b) => a + b.byteLength, 0)
+  const result = new Uint8Array(size)
+  let offset = 0
+  for (const arr of arrays) {
+    result.set(arr as any, offset)
+    offset += arr.byteLength
+  }
+  return result.buffer;
+}
+
+function generateArray(size: number,generator: (index: number) => any): any[] {
+  const array: any[] = [];
+  for(let i = 0; i < size; i++) array.push(generator(i));
+  return array;
+}
+
+function randomIntFromInterval(min, max) {
+  return Math.floor(Math.random() * (max - min + 1) + min)
+}
+
 describe('Ziron', () => {
+
+  afterEach(() => {
+    [comA1,comA2,comB1,comB2].forEach((com) => {
+      com.emitOpen();
+      com.onTransmit = () => {};
+      com.onInvoke = () => {};
+    });
+  })
 
   describe('Transmits', () => {
 
@@ -102,177 +133,6 @@ describe('Ziron', () => {
         await receivePromise;
       });
     })
-
-    it('B should receive the streamed json transmit data fully.', (done) => {
-      const writeStream = new WriteStream();
-      const writtenData: any[] = [];
-      writeStream.onOpen = async () => {
-        //simulate accept package transmit time
-        await new Promise((res) => setTimeout(res,10));
-        for(let i = 0; i < 500; i++) {
-          writtenData.push(i);
-          writeStream.write(i);
-        }
-        writtenData.push(500);
-        writeStream.writeAndClose(500,false,200);
-      };
-      comB1.onTransmit = (event,data: ReadStream,type) => {
-        expect(event).to.be.equal('streamJson');
-        expect(type).to.be.equal(DataType.Stream);
-        expect(data).to.be.instanceof(ReadStream);
-        const chunks: any[] = [];
-        data.onChunk = (chunk) => {
-          chunks.push(chunk)
-        };
-        data.onClose = (code) => {
-          expect(code).to.be.equal(200);
-          expect(chunks).to.be.deep.equal(writtenData);
-          done();
-        };
-        data.accept(2000);
-      };
-      comA1.transmit('streamJson',writeStream,{processComplexTypes: true});
-    });
-
-    it('B should receive the streamed binary transmit data fully.', (done) => {
-      const writeStream = new WriteStream();
-      const writtenData: any[] = [];
-      writeStream.onOpen = () => {
-        for(let i = 0; i < 100; i++) {
-          const binary = new ArrayBuffer(i);
-          writtenData.push(binary);
-          writeStream.write(binary,true);
-        }
-        writeStream.close(200);
-      };
-      comB1.onTransmit = (event,data: ReadStream,type) => {
-        expect(event).to.be.equal('streamBinary');
-        expect(type).to.be.equal(DataType.Stream);
-        expect(data).to.be.instanceof(ReadStream);
-        const chunks: any[] = [];
-        data.onChunk = (chunk) => {
-          chunks.push(chunk)
-        };
-        data.onClose = (code) => {
-          expect(code).to.be.equal(200);
-          expect(chunks).to.be.deep.equal(writtenData);
-          done();
-        };
-        data.accept();
-      };
-      comA1.transmit('streamBinary',writeStream,{processComplexTypes: true});
-    });
-
-    it("A's write stream should be closed when B closes the read stream.", (done) => {
-      const writeStream = new WriteStream();
-      writeStream.onClose = (code) => {
-        expect(code).to.be.equal(505);
-        done();
-      };
-      comB1.onTransmit = (event,data: ReadStream,type) => {
-        expect(event).to.be.equal('readStreamClose');
-        expect(type).to.be.equal(DataType.Stream);
-        expect(data).to.be.instanceof(ReadStream);
-        data.close(505)
-      };
-      comA1.transmit('readStreamClose',writeStream,{processComplexTypes: true});
-    });
-
-    it("Ignored read stream should end write stream with an accept timeout.", (done) => {
-      WriteStream.acceptTimeout = 60;
-      const writeStream = new WriteStream();
-      writeStream.onClose = (code) => {
-        expect(code).to.be.equal(StreamCloseCode.AcceptTimeout);
-        done();
-      };
-      comB1.onTransmit = (event,data: ReadStream) => {
-        expect(event).to.be.equal('streamAcceptTimeout');
-      };
-      comA1.transmit('streamAcceptTimeout',writeStream,{processComplexTypes: true});
-    });
-
-
-    it("An accept read stream which will not receive anything a certain time should end with ReceiveTimeout.", (done) => {
-      const writeStream = new WriteStream();
-
-      comB1.onTransmit = (event,data: ReadStream) => {
-        expect(event).to.be.equal('streamReceiveTimeout');
-
-        data.onClose = (code) => {
-          expect(code).to.be.equal(StreamCloseCode.ReceiveTimeout);
-          done();
-        }
-        data.accept(60);
-
-      };
-      comA1.transmit('streamReceiveTimeout',writeStream,{processComplexTypes: true});
-    });
-
-    it('All batch transmits should be received.', (done) => {
-      const count = 43;
-
-      let receivedI = 0;
-      comB1.onTransmit = (event,data) => {
-        expect(event).to.be.equal('batch');
-        expect(data).to.be.equal('msg');
-        receivedI++;
-        if(receivedI === count) done();
-      };
-
-      comA1.maxBufferChunkLength = 5
-      comA1.limitBatchPackageLength = 2
-      for(let i = 0; i < count; i++){
-        comA1.transmit('batch','msg',{batch: 50});
-      }
-      comA1.maxBufferChunkLength = undefined;
-    });
-
-    it('Should not send cancelled batch packages.', (done) => {
-      const count = 10;
-
-      let receivedI = 0;
-      comB1.onTransmit = () => {
-        receivedI++;
-      };
-
-      const packages: PreparedPackage[] = [];
-      for(let i = 0; i < count; i++){
-        packages.push(Transport.prepareMultiTransmit('batch','msg'));
-        comA1.sendPreparedPackage(packages[i],10);
-      }
-      packages.forEach(pack => comA1.tryCancelPackage(pack));
-
-      setTimeout(() => {
-        expect(receivedI).to.be.equal(0);
-        done();
-      },50)
-    });
-
-    it('Transmit a stream and a connection lost after sending should close the ReadStream after accepting.', (done) => {
-
-      let simulatedBadConnectionPromise;
-
-      comB1.onTransmit = async (event,data: ReadStream) => {
-        await simulatedBadConnectionPromise;
-        expect(event).to.be.equal('stream');
-        expect(data).to.be.instanceOf(ReadStream);
-        expect(data.state).to.be.equal(StreamState.Pending);
-
-        data.onClose = (code) => {
-          expect(code).to.be.equal(StreamCloseCode.BadConnection);
-          done();
-          comB1.emitOpen();
-        };
-        data.accept();
-      };
-
-      simulatedBadConnectionPromise = new Promise(async (res) => {
-        await comA1.transmit('stream',new WriteStream(),{processComplexTypes: true});
-        comB1.emitBadConnection(BadConnectionType.Disconnect);
-        res();
-      })
-    });
-
   });
 
   describe('Multi Transmits', () => {
@@ -378,16 +238,17 @@ describe('Ziron', () => {
     it('B should receive the invoke with MixedJSON data.', (done) => {
 
       let writtenCode: any[];
-      const writeStream = new WriteStream(() => {
+      const writeStream = new WriteStream();
+      (async () => {
         const chunk1 = new ArrayBuffer(20);
         const chunk2 = new ArrayBuffer(25);
         writtenCode = [chunk1,chunk2];
-        writeStream.write(chunk1,true);
-        writeStream.writeAndClose(chunk2,true,200);
-      });
+        await writeStream.write(chunk1,true);
+        await writeStream.writeLast(chunk2,true);
+      })()
 
       const car = {avatar: new ArrayBuffer(20), model: 'X1', hp: 500, code: writeStream};
-      comB1.onInvoke = (event,data,end) => {
+      comB1.onInvoke = async (event,data,end) => {
         expect(event).to.be.equal('car');
 
         expect(data.avatar).to.be.deep.equal(car.avatar);
@@ -396,15 +257,11 @@ describe('Ziron', () => {
         expect(data.code).to.be.instanceOf(ReadStream);
 
         const codeReadStream: ReadStream = data.code;
-        const chunks: any[] = [];
-        codeReadStream.onChunk = (chunk) => {
-          chunks.push(chunk);
-        };
-        codeReadStream.onClose = () => {
-          expect(chunks).to.be.deep.equal(writtenCode);
-          end(1);
-        }
         codeReadStream.accept();
+        const chunks: any[] = await codeReadStream.readAll();
+
+        expect(chunks).to.be.deep.equal(writtenCode);
+        end(1);
       };
       comA1.invoke('car',car,{processComplexTypes: true}).then(result => {
         expect(result).to.be.equal(1);
@@ -419,31 +276,25 @@ describe('Ziron', () => {
         expect(event).to.be.equal('tv');
 
         const writeStream = new WriteStream();
-        writeStream.onOpen = () => {
+        (async () => {
           const chunk1 = new ArrayBuffer(20);
           const chunk2 = new ArrayBuffer(25);
           writtenCode = [chunk1,chunk2];
           writeStream.write(chunk1,true);
-          writeStream.writeAndClose(chunk2,true,200);
-        };
-
+          writeStream.writeLast(chunk2,true);
+        })();
         tv = {avatar: new ArrayBuffer(20), model: 'Y1', code: writeStream};
         end(tv,true);
       };
-      comA1.invoke('tv').then(result => {
+      comA1.invoke('tv').then(async result => {
         expect(result.avatar).to.be.deep.equal(tv.avatar);
         expect(result.model).to.be.equal(result.model);
 
         const codeReadStream: ReadStream = result.code;
-        const chunks: any[] = [];
-        codeReadStream.onChunk = (chunk) => {
-          chunks.push(chunk);
-        };
-        codeReadStream.onClose = () => {
-          expect(chunks).to.be.deep.equal(writtenCode);
-          done();
-        }
         codeReadStream.accept();
+        const chunks: any[] = await codeReadStream.readAll();
+        expect(chunks).to.be.deep.equal(writtenCode);
+        done();
       });
     });
 
@@ -490,6 +341,390 @@ describe('Ziron', () => {
       });
     });
 
+  });
+
+  describe('LinkedBuffer', () => {
+    [
+      [
+        {size: 10,data: {}},
+        {size: 5,data: {}},
+        {size: 24,data: {}},
+        {size: 60,data: {}},
+        {size: 30,data: {}}
+      ],
+      [
+        {size: 900,data: {}},
+      ]
+    ].forEach((testData,i) => {
+      it(`LinkedBuffer should successfully store data - ${i}.`,() => {
+        const buffer = new LinkedBuffer();
+        let size = 0;
+        for(let i = 0; i < testData.length; i++) {
+          const data = testData[i];
+          size += data.size;
+          buffer.push(data,data.size);
+        }
+
+        expect(buffer.length).to.be.equal(testData.length);
+        expect(buffer.size).to.be.equal(size);
+
+        let leftSize = size;
+        for(let i = 0; i < testData.length; i++) {
+          const data = testData[i];
+          leftSize -= data.size;
+
+          const item = buffer.shift();
+          expect(item).to.be.equal(data);
+          expect(buffer.size).to.be.equal(leftSize);
+        }
+        expect(leftSize).to.be.equal(0);
+      });
+    })
+  });
+
+  describe('Streams', () => {
+    [
+      {
+        binary: false,
+        bufferSize: 200,
+        data: generateArray(100,i => i),
+        processComplexTypes: true,
+      },
+      {
+        binary: false,
+        bufferSize: 1,
+        data: generateArray(137,i => i),
+        processComplexTypes: false
+      },
+      {
+        binary: false,
+        bufferSize: 1,
+        data: generateArray(23,i => new ArrayBuffer(i)),
+        processComplexTypes: true
+      },
+      {
+        binary: false,
+        bufferSize: 8,
+        data: generateArray(32,i =>
+            ({name: `Name: ${i}`,age: i,image: new ArrayBuffer(16)})),
+        processComplexTypes: true
+      },
+      {
+        binary: false,
+        bufferSize: 50,
+        data: generateArray(100,i => i),
+        simulateSlowRead: true,
+        readBreakInterval: 20
+      },
+      {
+        binary: false,
+        bufferSize: 1,
+        data: generateArray(100,i => i),
+        simulateSlowRead: true,
+        readBreakInterval: 3
+      },
+      {
+        binary: true,
+        bufferSize: 8192,
+        data: generateArray(137,i => new ArrayBuffer(i)),
+      },
+      {
+        binary: true,
+        bufferSize: 1,
+        data: generateArray(29,i => new ArrayBuffer(i)),
+      },
+      {
+        binary: true,
+        bufferSize: 8192,
+        data: generateArray(224,i =>
+            (new Uint8Array(generateArray(randomIntFromInterval(15,30),
+                () => randomIntFromInterval(0,100)))).buffer),
+      },
+      {
+        binary: true,
+        bufferSize: 1,
+        data: generateArray(13,i =>
+            (new Uint8Array(generateArray(randomIntFromInterval(15,30),
+                () => randomIntFromInterval(0,100)))).buffer),
+      },
+      {
+        binary: true,
+        bufferSize: 8192,
+        data: generateArray(137,i => new ArrayBuffer(i)),
+        simulateSlowRead: true,
+        readBreakInterval: 20
+      },
+      {
+        binary: true,
+        bufferSize: 1,
+        data: generateArray(28,i => new ArrayBuffer(i)),
+        simulateSlowRead: true,
+        readBreakInterval: 50
+      },
+    ].forEach((test,index) => {
+      it(`B should receive the data of an ${test.binary ?
+          'binary' : 'object'} stream fully${test.simulateSlowRead ? " (SLOW READ)" : ""
+      } - ${index}.`,function (done)
+      {
+        this.timeout(10000);
+
+        const writeStream = new WriteStream(test.binary);
+        (async () => {
+          for(let i = 0; i < (test.data.length - 1); i++) {
+            if(!test.binary) await (writeStream as WriteStream<false>).write(test.data[i],test.processComplexTypes);
+            else await (writeStream as WriteStream<true>).write(test.data[i]);
+          }
+          if(!test.binary) (writeStream as WriteStream<false>)
+              .writeLast(test.data[test.data.length - 1],test.processComplexTypes);
+          else (writeStream as WriteStream<true>)
+              .writeLast(test.data[test.data.length - 1]);
+        })();
+
+        comB1.onTransmit = async (event, data: ReadStream, type) => {
+          expect(event).to.be.equal('streamJson');
+          expect(type).to.be.equal(DataType.Stream);
+          expect(data).to.be.instanceof(ReadStream);
+
+          test.readBreakInterval = test.readBreakInterval || 5;
+          data.accept({bufferSize: test.bufferSize});
+          let chunks: any[] = [];
+          let chunk = await data.read();
+          let i = 0;
+          while (chunk != null) {
+            chunks.push(chunk);
+            if(test.simulateSlowRead && i % test.readBreakInterval === 0) {
+              await new Promise(r => setTimeout(r,80))
+            }
+            chunk = await data.read();
+            i++;
+          }
+          expect(data.errorCode).to.be.equal(undefined);
+          expect(data.successfullyClosed).to.be.equal(true);
+          expect(test.binary ? concatenateBuffer(...chunks) : chunks).to.be.deep
+              .equal(test.binary ? concatenateBuffer(...test.data) : test.data);
+          done();
+        };
+        comA1.transmit('streamJson',writeStream,{processComplexTypes: true});
+      })
+    });
+
+    it("A's write stream should be closed when B closes the read stream.", (done) => {
+      const writeStream = new WriteStream();
+      writeStream.onClose = (code) => {
+        expect(code).to.be.equal(505);
+        done();
+      };
+      comB1.onTransmit = (event, data: ReadStream, type) => {
+        expect(event).to.be.equal('readStreamClose');
+        expect(type).to.be.equal(DataType.Stream);
+        expect(data).to.be.instanceof(ReadStream);
+        data.close(505)
+      };
+      comA1.transmit('readStreamClose',writeStream,{processComplexTypes: true});
+    });
+
+    it("The writer should write correctly.", (done) => {
+      const writeStream = new WriteStream();
+      const result: number[] = [];
+      let i = 1;
+      writeStream.setWriter(write => {
+        if(i > 10) return write(null);
+        result.push(i);
+        write(i++)
+      });
+
+      comB1.onTransmit = async (event, data: ReadStream, type) => {
+        expect(event).to.be.equal('readStreamClose');
+        expect(type).to.be.equal(DataType.Stream);
+        expect(data).to.be.instanceof(ReadStream);
+        data.accept();
+        expect(await data.readAll()).to.be.deep.equal(result);
+        done();
+      };
+      comA1.transmit('readStreamClose',writeStream,{processComplexTypes: true});
+    });
+
+    it("The chunk middleware should be able to update chunks.", (done) => {
+      const writeStream = new WriteStream(true);
+      let i = 1;
+      writeStream.setWriter(write => {
+        if(i > 3) return write(null);
+        write(new ArrayBuffer(i++))
+      });
+
+      comB1.onTransmit = async (event, data: ReadStream, type) => {
+        expect(event).to.be.equal('chunkMiddleware');
+        expect(type).to.be.equal(DataType.Stream);
+        expect(data).to.be.instanceof(ReadStream);
+
+        const result: ArrayBuffer[] = [];
+        data.chunkMiddleware = (chunk, updateChunk) => {
+          const newBuffer = (new Uint8Array(generateArray(randomIntFromInterval(20,30),
+              () => randomIntFromInterval(0,100)))).buffer;
+          updateChunk(newBuffer);
+          result.push(newBuffer);
+          return true;
+        }
+        data.accept({sizeLimit: 8});
+        expect(concatenateBuffer(...await data.readAll()))
+            .to.be.deep.equal(concatenateBuffer(...result));
+        done();
+      };
+      comA1.transmit('chunkMiddleware',writeStream,{processComplexTypes: true});
+    });
+
+    it("Ignored read stream should end write stream with an accept timeout.", (done) => {
+      const writeStream = new WriteStream(false,{acceptTimeout: 60});
+      writeStream.onClose = (code) => {
+        expect(code).to.be.equal(StreamErrorCloseCode.AcceptTimeout);
+        done();
+      };
+      comB1.onTransmit = (event,data: ReadStream) => {
+        expect(event).to.be.equal('streamAcceptTimeout');
+      };
+      comA1.transmit('streamAcceptTimeout',writeStream,{processComplexTypes: true});
+    });
+
+    it("An accept read stream which will not receive anything a certain time should end with chunk timeout.", (done) => {
+      const writeStream = new WriteStream();
+
+      comB1.onTransmit = (event,data: ReadStream) => {
+        expect(event).to.be.equal('streamChunkTimeout');
+
+        data.onClose = (code) => {
+          expect(code).to.be.equal(StreamErrorCloseCode.ChunkTimeout);
+          done();
+        }
+        data.accept({
+          bufferSize: 6,
+          chunkTimeout: 60
+        });
+
+      };
+      comA1.transmit('streamChunkTimeout',writeStream,{processComplexTypes: true});
+    });
+
+    it("An accepted read stream with long time full buffer should trigger the write stream size permission timeout.", (done) => {
+      const writeStream = new WriteStream(false,{
+        sizePermissionTimeout: 50
+      });
+      writeStream.onClose = (code) => {
+        expect(code).to.be.equal(StreamErrorCloseCode.SizePermissionTimeout);
+        done();
+      }
+
+      comB1.onTransmit = (event,data: ReadStream) => {
+        expect(event).to.be.equal('sizePermissionTimeout');
+        data.accept({
+          bufferSize: 1,
+        });
+      };
+      comA1.transmit('sizePermissionTimeout',writeStream,{processComplexTypes: true});
+
+      let i = 0;
+      writeStream.setWriter((write) =>  {
+        write(i > 50 ? null : i++);
+      });
+    });
+
+    it("Write stream that doesn't get any close package after send EOF should trigger endClosureTimeout.", (done) => {
+      const writeStream = new WriteStream(false,{
+        endClosureTimeout: 50
+      });
+      writeStream.onClose = (code) => {
+        expect(code).to.be.equal(StreamErrorCloseCode.EndClosureTimeout);
+        done();
+      }
+
+      comB1.onTransmit = (event,data: ReadStream) => {
+        expect(event).to.be.equal('endClosureTimeout');
+        data.chunkMiddleware = async () => {
+          //blocking processing
+          await new Promise(r => setTimeout(r,200));
+          return true;
+        }
+        data.accept();
+      };
+      comA1.transmit('endClosureTimeout',writeStream,{processComplexTypes: true});
+
+      (async () => {
+        await writeStream.write(1);
+        await writeStream.write(null);
+      })()
+    });
+
+    it('Transmit a stream and a connection lost on B after sending should close the ReadStream after accepting.', (done) => {
+
+      let simulatedBadConnectionPromise;
+
+      comB1.onTransmit = async (event,data: ReadStream) => {
+        await simulatedBadConnectionPromise;
+        expect(event).to.be.equal('stream');
+        expect(data).to.be.instanceOf(ReadStream);
+        expect(data.state).to.be.equal(StreamState.Pending);
+
+        data.onClose = (code) => {
+          expect(code).to.be.equal(StreamErrorCloseCode.BadConnection);
+          done();
+          comB1.emitOpen();
+        };
+        data.accept();
+      };
+
+      simulatedBadConnectionPromise = new Promise(async (res) => {
+        await comA1.transmit('stream',new WriteStream(),{processComplexTypes: true});
+        comB1.emitBadConnection(BadConnectionType.Disconnect);
+        res();
+      })
+    });
+
+    [{
+      binary: true
+    },{
+      binary: false
+    }].forEach(test => {
+      it(`SizeLimit option should work properly in ${test.binary ? 'binary' : 'object'} mode.`, (done) => {
+        const writeStream = new WriteStream(test.binary);
+
+        let i = 1;
+        writeStream.setWriter(write => {
+          write(i < 10 ?
+              (test.binary ? new ArrayBuffer(i++) : i++) as any : null);
+        })
+
+        writeStream.onClose = (code) => {
+          expect(code).to.be.equal(StreamErrorCloseCode.SizeLimitExceeded);
+          done();
+        }
+
+        comB1.onTransmit = (event,data: ReadStream) => {
+          expect(event).to.be.equal('streamSizeLimit');
+          data.accept({sizeLimit: 2,bufferSize: 50});
+        };
+        comA1.transmit('streamSizeLimit',writeStream,{processComplexTypes: true});
+      });
+    })
+
+    it('Transmit a stream and a connection lost on A after sending should close the WriteStream.', async () => {
+      const writeStream = new WriteStream();
+      await comA1.transmit('stream',writeStream,{processComplexTypes: true});
+      comA1.emitBadConnection(BadConnectionType.Disconnect);
+
+      expect(writeStream.state).to.be.equal(StreamState.Closed);
+    });
+
+    it('ReadAll method of a failure closed ReadStream should throw a StreamCloseError.', async () => {
+      let readStream: ReadStream | null = null;
+      comB1.onTransmit = async (event,data: ReadStream) => {
+        readStream = data;
+      };
+      await comA1.transmit('stream',new WriteStream(),{processComplexTypes: true});
+
+      expect(readStream).to.be.instanceOf(ReadStream);
+      expect(readStream!.state).to.be.equal(StreamState.Pending);
+      readStream!.close(StreamErrorCloseCode.Abort);
+      await expect(readStream!.readAll()).to.be.rejectedWith(StreamCloseError);
+    });
   });
 
   describe('Ping/Pong', () => {
@@ -567,6 +802,48 @@ describe('Ziron', () => {
       });
     })
 
+  });
+
+  describe('Batching', () => {
+    it('All batch transmits should be received.', (done) => {
+      const count = 43;
+
+      let receivedI = 0;
+      comB1.onTransmit = (event,data) => {
+        expect(event).to.be.equal('batch');
+        expect(data).to.be.equal('msg');
+        receivedI++;
+        if(receivedI === count) done();
+      };
+
+      comA1.maxBufferChunkLength = 5
+      comA1.limitBatchPackageLength = 2
+      for(let i = 0; i < count; i++){
+        comA1.transmit('batch','msg',{batch: 50});
+      }
+      comA1.maxBufferChunkLength = undefined;
+    });
+
+    it('Should not send cancelled batch packages.', (done) => {
+      const count = 10;
+
+      let receivedI = 0;
+      comB1.onTransmit = () => {
+        receivedI++;
+      };
+
+      const packages: PreparedPackage[] = [];
+      for(let i = 0; i < count; i++){
+        packages.push(Transport.prepareMultiTransmit('batch','msg'));
+        comA1.sendPreparedPackage(packages[i],10);
+      }
+      packages.forEach(pack => comA1.tryCancelPackage(pack));
+
+      setTimeout(() => {
+        expect(receivedI).to.be.equal(0);
+        done();
+      },50)
+    });
   });
 
   describe('Stability', () => {
