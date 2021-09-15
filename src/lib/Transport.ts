@@ -4,19 +4,15 @@ GitHub: LucaCode
 Copyright(c) Luca Scaringella
  */
 
-import {
-    ActionPacket,
-    BundlePacket,
-    PacketType,
-} from "./Protocol";
-import {DataType, containsStreams, isMixedJSONDataType, parseJSONDataType} from "./DataType";
+import {ActionPacket, BundlePacket, PacketType,} from "./Protocol";
+import {containsStreams, DataType, isMixedJSONDataType, parseJSONDataType} from "./DataType";
 import {dehydrateError, hydrateError} from "./ErrorUtils";
 import {decodeJson, encodeJson, JSONString} from "./JsonUtils";
-import ReadStream from "./ReadStream";
-import WriteStream from "./WriteStream";
-import {StreamCloseCode} from "./StreamCloseCode";
+import ReadStream from "./streams/ReadStream";
+import WriteStream from "./streams/WriteStream";
+import {StreamErrorCloseCode} from "./streams/StreamErrorCloseCode";
 import {RESOLVED_PROMISE, Writable} from "./Utils";
-import {TimeoutError, TimeoutType, InvalidActionError, BadConnectionError, BadConnectionType} from "./Errors";
+import {BadConnectionError, BadConnectionType, InvalidActionError, TimeoutError, TimeoutType} from "./Errors";
 
 export interface ComplexTypesOption {
     /**
@@ -121,7 +117,8 @@ export default class Transport {
      * Can not be reset on connection lost
      * because prepared packets with old ids can exist.
      */
-    private _streamId: number = 0;
+    private _objectStreamId: number = 1;
+    private _binaryStreamId: number = -1;
     private _activeReadStreams: Record<string, ReadStream> = {};
     private _activeWriteStreams: Record<string, WriteStream> = {};
 
@@ -231,9 +228,19 @@ export default class Transport {
         return this._cid++;
     }
 
-    private _getNewStreamId(): number {
-        if(this._streamId > Number.MAX_SAFE_INTEGER) this._streamId = 0;
-        return this._streamId++;
+    /**
+     * @param binaryStream
+     * @private
+     */
+    private _getNewStreamId(binaryStream: boolean): number {
+        if(binaryStream) {
+            if(this._binaryStreamId < Number.MIN_SAFE_INTEGER) this._binaryStreamId = -1;
+            return this._binaryStreamId--;
+        }
+        else {
+            if(this._objectStreamId > Number.MAX_SAFE_INTEGER) this._objectStreamId = 1;
+            return this._objectStreamId++;
+        }
     }
 
     private _processBinaryPacket(buffer: ArrayBuffer) {
@@ -248,10 +255,9 @@ export default class Transport {
             }
         }
         else if(header === PacketType.StreamChunk)
-            this._processBinaryStreamChunk((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9))
-        else if(header === PacketType.WriteStreamClose)
-            this._processBinaryStreamClose((new Float64Array(buffer.slice(1,9)))[0],
-                (new Float64Array(buffer.slice(9,17)))[0],buffer.slice(17))
+            this._processBinaryStreamChunk((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9));
+        else if(header === PacketType.StreamLastChunk)
+            this._processBinaryStreamChunk((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9),true);
         else this.onInvalidMessage(new Error('Unknown binary package header type.'))
     }
 
@@ -281,10 +287,12 @@ export default class Transport {
                 }
                 return;
             case PacketType.StreamChunk: return this._processJsonStreamChunk(packet['1'],packet['2'],packet['3']);
-            case PacketType.WriteStreamClose: return this._processJsonWriteStreamClose(packet['1'], packet['2'], packet['3'], packet['4']);
-            case PacketType.StreamAccept: return this._processStreamAccept(packet['1']);
-            case PacketType.ReadStreamClose: return this._processReadStreamClose(packet['1'], packet['2']);
+            case PacketType.StreamDataPermission: return this._processStreamDataPermission(packet['1'],packet['2']);
+            case PacketType.StreamLastChunk: return this._processJsonStreamChunk(packet['1'],packet['2'],packet['3'],true);
             case PacketType.InvokeErrResp: return this._rejectInvoke(packet['1'],packet['2']);
+            case PacketType.ReadStreamClose: return this._processReadStreamClose(packet['1'], packet['2']);
+            case PacketType.StreamAccept: return this._processStreamAccept(packet['1'],packet['2']);
+            case PacketType.WriteStreamClose: return this._processJsonWriteStreamClose(packet['1'], packet['2']);
             default: return this.onInvalidMessage(new Error('Unknown packet type.'));
         }
     }
@@ -298,49 +306,46 @@ export default class Transport {
         }
     }
 
-    private _processStreamAccept(streamId: number) {
+    private _processStreamAccept(streamId: number,bufferSize: number | any) {
+        if(typeof bufferSize !== 'number') throw new Error('Invalid buffer size data type to accept a stream.');
         const stream = this._activeWriteStreams[streamId];
-        if(stream) stream._open();
+        if(stream) stream._open(bufferSize);
     }
 
-    private _processReadStreamClose(streamId: number, code: StreamCloseCode | number) {
+    private _processStreamDataPermission(streamId: number,size: number | any) {
+        if(typeof size !== 'number') throw new Error('Invalid stream data permission size data type.');
         const stream = this._activeWriteStreams[streamId];
-        if(stream && typeof code === 'number') {
-            stream.close(code);
-        }
+        if(stream) stream._addDataPermission(size);
     }
 
-    private _processJsonWriteStreamClose(streamId: number, code: StreamCloseCode | number, dataType?: DataType, data?: any) {
+    private _processReadStreamClose(streamId: number, errorCode?: StreamErrorCloseCode | number) {
+        if(typeof errorCode !== 'number' && typeof errorCode !== 'undefined')
+            throw new Error('Invalid close code data type to close a stream.');
+        const stream = this._activeWriteStreams[streamId];
+        if(stream) stream._readStreamClose(errorCode);
+    }
+
+    private _processJsonWriteStreamClose(streamId: number, code: StreamErrorCloseCode | number) {
+        if(typeof code !== 'number') throw new Error('Invalid close code data type to close a stream.');
         const stream = this._activeReadStreams[streamId];
-        if(stream) {
-            if(typeof dataType === 'number') {
-                if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
-                    throw new Error('Streams in chunks are not allowed.');
-                stream._addChunkToChain(this._processData(dataType,data),dataType);
-            }
-            if(typeof code === 'number') stream._addCloseToChain(code);
-        }
+        if(stream) stream._close(code);
     }
 
-    private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any) {
+    private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any, last?: boolean) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
             if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
                 throw new Error('Streams in chunks are not allowed.');
-            stream._addChunkToChain(this._processData(dataType,data),dataType);
+            stream._pushChunk(this._processData(dataType,data),dataType);
+            if(last) stream._pushChunk(null,DataType.JSON);
         }
     }
 
-    private _processBinaryStreamChunk(streamId: number, binary: ArrayBuffer) {
-        const stream = this._activeReadStreams[streamId];
-        if(stream) stream._addChunkToChain(binary,DataType.Binary);
-    }
-
-    private _processBinaryStreamClose(streamId: number, code: StreamCloseCode | number, binary: ArrayBuffer) {
+    private _processBinaryStreamChunk(streamId: number, binary: ArrayBuffer, last?: boolean) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
-            if(binary.byteLength > 0) stream._addChunkToChain(binary,DataType.Binary);
-            if(typeof code === 'number') stream._addCloseToChain(code);
+            stream._pushChunk(binary,DataType.Binary);
+            if(last) stream._pushChunk(null,DataType.JSON);
         }
     }
 
@@ -378,7 +383,7 @@ export default class Transport {
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
         else if(data instanceof WriteStream && Transport.streamsEnabled){
-            const streamId = this._getNewStreamId();
+            const streamId = this._getNewStreamId(data.binary);
             this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.Stream + ',' + streamId);
             data._init(this,streamId);
@@ -479,7 +484,7 @@ export default class Transport {
         return packetBuffer.buffer;
     }
 
-    private _processMixedJSONDeep(data: any, binaryReferencePackets: any[], streamClosed: Promise<void>[]) {
+    private _processMixedJSONDeep(data: any, binaryReferencePackets: any[], streamClosed: Promise<any>[]) {
         if(typeof data === 'object' && data){
             if(data instanceof ArrayBuffer){
                 const placeholderId = this._getNewBinaryPlaceholderId();
@@ -488,7 +493,7 @@ export default class Transport {
             }
             else if(data instanceof WriteStream){
                 if(Transport.streamsEnabled){
-                    const streamId = this._getNewStreamId();
+                    const streamId = this._getNewStreamId(data.binary);
                     data._init(this,streamId);
                     streamClosed.push(data.closed);
                     return {__stream__: streamId}
@@ -551,7 +556,7 @@ export default class Transport {
      * @param stream
      * @private
      */
-    _addWriteStream(id: number, stream: WriteStream) {
+    _addWriteStream(id: number, stream: WriteStream<any>) {
         this._activeWriteStreams[id] = stream;
     }
 
@@ -617,7 +622,7 @@ export default class Transport {
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
         else if(data instanceof WriteStream && Transport.streamsEnabled){
-            const streamId = this._getNewStreamId();
+            const streamId = this._getNewStreamId(data.binary);
             const packet: PreparedPackage = [PacketType.Transmit + ',"' + receiver + '",' +
                 DataType.Stream + ',' + streamId];
             data._init(this,streamId);
@@ -693,7 +698,7 @@ export default class Transport {
 
             if(data instanceof WriteStream && Transport.streamsEnabled){
                 preparedPackage._afterSend = setResponse;
-                const streamId = this._getNewStreamId();
+                const streamId = this._getNewStreamId(data.binary);
                 preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                     DataType.Stream + ',' + streamId;
                 data.closed.then(setResponseTimeout);
@@ -879,38 +884,50 @@ export default class Transport {
      * @param streamId
      * @param data
      * @param processComplexTypes
+     * @param last
      * @private
      */
-    _sendStreamChunk(streamId: number, data: any, processComplexTypes?: boolean) {
+    _sendStreamChunk(streamId: number, data: any, processComplexTypes?: boolean, last?: boolean) {
         if(!processComplexTypes) {
-            this.send(PacketType.StreamChunk + ',' + streamId + ',' +
-                DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
+            this.send((last ? PacketType.StreamLastChunk : PacketType.StreamChunk) +
+                ',' + streamId + ',' + DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
         else if(Transport.chunksCanContainStreams && data instanceof WriteStream){
-            const streamId = this._getNewStreamId();
-            this.send(PacketType.StreamChunk + ',' + streamId + ',' +
-                DataType.Stream + ',' + streamId);
+            const streamId = this._getNewStreamId(data.binary);
+            this.send((last ? PacketType.StreamLastChunk : PacketType.StreamChunk) +
+                ',' + streamId + ',' + DataType.Stream + ',' + streamId);
             data._init(this,streamId);
         }
-        else if(data instanceof ArrayBuffer) this.send(Transport._createBinaryStreamChunkPacket(streamId,data));
+        else if(data instanceof ArrayBuffer) this.send(
+            Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),last));
         else {
             const packets: (string | ArrayBuffer)[] = [];
             const streams: any[] = [];
             packets.length = 1;
             data = this._processMixedJSONDeep(data,packets,streams);
 
-            packets[0] = PacketType.StreamChunk + ',' + streamId + ',' +
-                parseJSONDataType(packets.length > 1 || streams.length > 0) +
+            packets[0] = (last ? PacketType.StreamLastChunk : PacketType.StreamChunk) +
+                ',' + streamId + ',' + parseJSONDataType(packets.length > 1 || streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
             for(let i = 0; i < packets.length; i++) this.send(packets[i])
         }
     }
 
-    private static _createBinaryStreamChunkPacket(streamId: number, binary: ArrayBuffer): ArrayBuffer {
+    /**
+     * @internal
+     * @description
+     * Useful to send a binary stream chunk
+     * packet directly (faster than using _sendStreamChunk).
+     */
+    _sendBinaryStreamChunk(streamId: number, binaryPart: Uint8Array, last?: boolean) {
+        this.send(Transport._createBinaryStreamChunkPacket(streamId,binaryPart,last))
+    }
+
+    private static _createBinaryStreamChunkPacket(streamId: number, binary: Uint8Array, last?: boolean): ArrayBuffer {
         const packetBuffer = new Uint8Array(9 + binary.byteLength);
-        packetBuffer[0] = PacketType.StreamChunk;
+        packetBuffer[0] = last ? PacketType.StreamLastChunk : PacketType.StreamChunk;
         packetBuffer.set(new Uint8Array((new Float64Array([streamId])).buffer),1);
-        packetBuffer.set(new Uint8Array(binary),9);
+        packetBuffer.set(binary,9);
         return packetBuffer.buffer;
     }
 
@@ -918,67 +935,45 @@ export default class Transport {
      * Only use when the connection was not lost in-between time.
      * @internal
      * @param streamId
+     * @param allowedSize
      * @private
      */
-    _sendStreamAccept(streamId: number) {
-        this.send(PacketType.StreamAccept + ',' + streamId);
+    _sendStreamAccept(streamId: number,allowedSize: number) {
+        this.send(PacketType.StreamAccept + ',' + streamId + ',' + allowedSize);
     }
 
     /**
      * Only use when the connection was not lost in-between time.
      * @internal
      * @param streamId
-     * @param code
+     * @param allowedSize
      * @private
      */
-    _sendReadStreamClose(streamId: number, code: number) {
-        this.send(PacketType.ReadStreamClose + ',' + streamId + ',' + code);
+    _sendStreamAllowMore(streamId: number,allowedSize: number) {
+        this.send(PacketType.StreamDataPermission + ',' + streamId + ',' + allowedSize);
     }
 
     /**
      * Only use when the connection was not lost in-between time.
      * @internal
      * @param streamId
-     * @param code
-     * @param data
-     * @param processComplexTypes
+     * @param errorCode
      * @private
      */
-    _sendWriteStreamClose(streamId: number, code: number, data?: any, processComplexTypes?: boolean) {
-        if(data === undefined) return this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code);
-        else {
-            if(!processComplexTypes) {
-                this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
-                    DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
-            }
-            else if(Transport.chunksCanContainStreams && data instanceof WriteStream){
-                const streamId = this._getNewStreamId();
-                this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + code + ',' +
-                    DataType.Stream + ',' + streamId);
-                data._init(this,streamId);
-            }
-            else if(data instanceof ArrayBuffer) this.send(Transport._createBinaryWriteStreamClosePacket(streamId, code, data));
-            else {
-                const packets: (string | ArrayBuffer)[] = [];
-                const streams: any[] = [];
-                packets.length = 1;
-                data = this._processMixedJSONDeep(data,packets,streams);
-
-                packets[0] = PacketType.WriteStreamClose + ',' + + streamId + ',' + code + ',' +
-                    parseJSONDataType(packets.length > 1 || streams.length > 0) +
-                    (data !== undefined ? (',' + encodeJson(data)) : '');
-                for(let i = 0; i < packets.length; i++) this.send(packets[i])
-            }
-        }
+    _sendReadStreamClose(streamId: number, errorCode?: number) {
+        this.send(PacketType.ReadStreamClose + ',' + streamId +
+            (errorCode != null ? (',' + errorCode) : ''));
     }
 
-    private static _createBinaryWriteStreamClosePacket(streamId: number, code: number, binary: ArrayBuffer): ArrayBuffer {
-        const packetBuffer = new Uint8Array(17 + binary.byteLength);
-        packetBuffer[0] = PacketType.WriteStreamClose;
-        packetBuffer.set(new Uint8Array((new Float64Array([streamId])).buffer),1);
-        packetBuffer.set(new Uint8Array((new Float64Array([code])).buffer),9)
-        packetBuffer.set(new Uint8Array(binary),17);
-        return packetBuffer.buffer;
+    /**
+     * Only use when the connection was not lost in-between time.
+     * @internal
+     * @param streamId
+     * @param errorCode
+     * @private
+     */
+    _sendWriteStreamClose(streamId: number, errorCode: number) {
+        this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + errorCode);
     }
 
     /**

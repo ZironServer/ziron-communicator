@@ -4,8 +4,8 @@ GitHub: LucaCode
 Copyright(c) Luca Scaringella
  */
 
-import ReadStream from "./ReadStream";
-import WriteStream from "./WriteStream";
+import ReadStream from "./streams/ReadStream";
+import WriteStream from "./streams/WriteStream";
 
 export const enum DataType {
     JSON,
