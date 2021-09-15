@@ -1,7 +1,7 @@
 {
   "name": "ziron-engine",
   "description": "The Ziron typescript engine that handles sending of transmits and invokes.",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "license": "UNLICENSED",
