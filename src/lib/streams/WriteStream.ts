@@ -100,6 +100,8 @@ export default class WriteStream<B extends boolean = false> {
     private _acceptTimeoutTicker: NodeJS.Timeout;
     private _endClosureTimeoutTicker: NodeJS.Timeout;
 
+    private _eofSent: boolean;
+
     constructor(binary?: B,timeouts?: TimeoutOption) {
         this.binary = binary || false;
         this.write = (binary ? this.binaryWrite.bind(this) : this.objectWrite.bind(this)) as any;
@@ -205,6 +207,7 @@ export default class WriteStream<B extends boolean = false> {
     private async binaryWrite(data: ArrayBuffer): Promise<boolean> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
+        if(this._eofSent) throw new Error("Can not write when end was already called.");
         if(this.state !== StreamState.Open) await this.opened;
         let availableSize = this.remainingSizeAllowed;
         if(data.byteLength <= availableSize) this._sendBinaryChunk(new Uint8Array(data));
@@ -231,6 +234,7 @@ export default class WriteStream<B extends boolean = false> {
     private async objectWrite(data: any, processComplexTypes?: boolean): Promise<boolean> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
+        if(this._eofSent) throw new Error("Can not write when end was already called.");
         if(this.state !== StreamState.Open) await this.opened;
 
         if(this.remainingSizeAllowed > 0) this._sendObjectChunk(data,processComplexTypes);
@@ -261,6 +265,7 @@ export default class WriteStream<B extends boolean = false> {
     private async binaryEnd(data?: ArrayBuffer): Promise<boolean> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
+        if(this._eofSent) throw new Error("End was already called.");
         if(this.state !== StreamState.Open) await this.opened;
 
         if(data == null) this._transport._sendStreamEnd(this._id);
@@ -278,6 +283,7 @@ export default class WriteStream<B extends boolean = false> {
     {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
+        if(this._eofSent) throw new Error("End was already called.");
         if(this.state !== StreamState.Open) await this.opened;
 
         if(data === undefined) this._transport._sendStreamEnd(this._id);
@@ -320,6 +326,7 @@ export default class WriteStream<B extends boolean = false> {
     }
 
     private _onEOFSend() {
+        this._eofSent = true;
         if(this.endClosureTimeout != null && this._endClosureTimeoutTicker == null) {
             this._endClosureTimeoutTicker = setTimeout(() => {
                 this.close(StreamErrorCloseCode.EndClosureTimeout);
