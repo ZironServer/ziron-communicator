@@ -118,6 +118,15 @@ export default class ReadStream {
      */
     public readonly closed: Promise<StreamErrorCloseCode | number | undefined> = new Promise(resolve => this._closedPromiseResolve = resolve);
 
+    private _openedPromiseResolve: () => void;
+
+    /**
+     * @description
+     * A promise that gets resolved when the stream opens.
+     * Notice the promise is still resolved when the stream has opened and closed.
+     */
+    public readonly opened: Promise<void> = new Promise(resolve => this._openedPromiseResolve = resolve);
+
     /**
      * @description
      * When the stream is closed with an error,
@@ -186,6 +195,7 @@ export default class ReadStream {
             this._setChunkTimeout();
         }
 
+        this._openedPromiseResolve();
     }
 
     /**
