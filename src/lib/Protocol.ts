@@ -15,7 +15,7 @@ export const enum PacketType {
     BinaryReference,
     StreamAccept,
     StreamChunk,
-    StreamLastChunk,
+    StreamEnd,
     StreamDataPermission,
     WriteStreamClose,
     ReadStreamClose,
@@ -78,10 +78,10 @@ export type StreamChunkPacket = [PacketType.StreamChunk,number,DataType,any];
  * Indexes:
  * 0: PacketType
  * 1: StreamId
- * 2: DataType
- * 3: Data
+ * 2?: DataType
+ * 3?: Data
  */
-export type StreamLastChunkPacket = [PacketType.StreamLastChunk,number,DataType,any];
+export type StreamEndPacket = [PacketType.StreamEnd,number,DataType?,any?];
 
 /**
  * Indexes:
@@ -109,6 +109,6 @@ export type ReadStreamClosePacket = [PacketType.ReadStreamClose,number,number?];
 
 export type ActionPacket = TransmitPacket | InvokePacket | InvokeErrRespPacket |
     InvokeDataRespPacket | StreamAcceptPacket | StreamDataPermissionPacket |
-    StreamChunkPacket | StreamLastChunkPacket |
+    StreamChunkPacket | StreamEndPacket |
     WriteStreamClosePacket | ReadStreamClosePacket ;
 export type BundlePacket = [PacketType.Bundle,ActionPacket[]];

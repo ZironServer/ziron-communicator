@@ -67,10 +67,10 @@ export default class ReadStream {
     private _allowedSize: number;
     private _receivedSize: number;
 
-    private _chunkChainEnd: boolean;
-    private _chunkChainCancel: boolean;
-    private _chunkChain: Promise<any>;
-    private _chunkChainSize: number;
+    private _chainEnd: boolean;
+    private _chainCancel: boolean;
+    private _chain: Promise<any>;
+    private _chainChunkSize: number;
 
     private readonly _createdBadConnectionTimestamp: number;
 
@@ -166,10 +166,10 @@ export default class ReadStream {
         this._allowedSize = this._bufferSizeLimit;
         this._receivedSize = 0;
 
-        this._chunkChain = Promise.resolve();
-        this._chunkChainEnd = false;
-        this._chunkChainCancel = false;
-        this._chunkChainSize = 0;
+        this._chain = Promise.resolve();
+        this._chainEnd = false;
+        this._chainCancel = false;
+        this._chainChunkSize = 0;
 
         this._transport._addReadStream(this.id,this);
         (this as Writable<ReadStream>).state = StreamState.Open;
@@ -211,7 +211,7 @@ export default class ReadStream {
     }
 
     private _checkAllowMore(applyMinimum?: boolean) {
-        if(this._chunkChainEnd || this.state !== StreamState.Open) return;
+        if(this._chainEnd || this.state !== StreamState.Open) return;
         /*
          Calculate the potential buffer size by adding the
          currently used buffer size and the size that can still be added.
@@ -271,7 +271,8 @@ export default class ReadStream {
             this._checkAllowMore();
             return Promise.resolve(chunk);
         }
-        else if(!this._chunkChainEnd) return this.readPromise = new Promise(r => this.readResolve = r);
+        else if(this._chainChunkSize > 0 || !this._chainEnd)
+            return this.readPromise = new Promise(r => this.readResolve = r);
         else return Promise.resolve(null);
     }
 
@@ -305,7 +306,7 @@ export default class ReadStream {
     }
 
     private _emptyChunksCheck() {
-        if(!this._chunkChainEnd && this._buffer.length <= 0 && this._chunkChainSize <= 0)
+        if(!this._chainEnd && this._buffer.length <= 0 && this._chainChunkSize <= 0)
             this._setChunkTimeout();
     }
 
@@ -320,17 +321,17 @@ export default class ReadStream {
      * @internal
      */
     _pushChunk(chunk: Promise<any> | ArrayBuffer | null, type: DataType) {
-        if(this.state === StreamState.Open && !this._chunkChainEnd) {
-            this._chunkChainSize++;
+        if(this.state === StreamState.Open && !this._chainEnd) {
+            this._chainChunkSize++;
             this._clearChunkTimeout();
-            this._chunkChain = this._chunkChain.then(() => this._chunkChainNext(chunk, type));
+            this._chain = this._chain.then(() => this._chainNextChunk(chunk, type));
         }
     }
 
-    private async _chunkChainNext(chunk: Promise<any> | ArrayBuffer | null, type: DataType) {
-        if(this._chunkChainCancel) return;
+    private async _chainNextChunk(chunk: Promise<any> | ArrayBuffer | null, type: DataType) {
+        if(this._chainCancel) return;
         await this._processChunk(chunk,type);
-        this._chunkChainSize--;
+        this._chainChunkSize--;
         this._emptyChunksCheck();
     }
 
@@ -338,14 +339,7 @@ export default class ReadStream {
         try {
             chunk = await chunk;
 
-            if(chunk === null) {
-                //EOF
-                this._transport._sendReadStreamClose(this.id);
-                this._close(undefined,true);
-                return;
-            }
-
-            if(this._chunkChainCancel) return;
+            if(this._chainCancel) return;
 
             if(this.binary && type !== DataType.Binary) {
                 this.close(StreamErrorCloseCode.InvalidChunk);
@@ -363,7 +357,7 @@ export default class ReadStream {
                 return this._transport.onInvalidMessage(new Error('Invalid stream chunk.'));
             }
 
-            if(this._chunkChainCancel) return;
+            if(this._chainCancel) return;
             this._receivedSize += size;
             if(this.readResolve) {
                 const resolve = this.readResolve;
@@ -383,6 +377,22 @@ export default class ReadStream {
         }
     }
 
+    /**
+     * @internal
+     */
+    _end() {
+        if(this.state === StreamState.Open && !this._chainEnd) {
+            this._chainEnd = true;
+            this._clearChunkTimeout();
+            this._chain = this._chain.then(() => this._processChainEnd());
+        }
+    }
+
+    private _processChainEnd() {
+        this._transport._sendReadStreamClose(this.id);
+        this._close(undefined,true);
+    }
+
     // noinspection JSUnusedGlobalSymbols
     /**
      * @internal
@@ -391,10 +401,10 @@ export default class ReadStream {
         this._close(StreamErrorCloseCode.BadConnection,false);
     }
 
-    _cancelChunkChain() {
-        this._chunkChainCancel = true;
-        this._chunkChainEnd = true;
-        this._chunkChainSize = 0;
+    private _cancelChunkChain() {
+        this._chainCancel = true;
+        this._chainEnd = true;
+        this._chainChunkSize = 0;
     }
 
     /**

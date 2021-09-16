@@ -9,6 +9,10 @@ import {StreamErrorCloseCode} from "./StreamErrorCloseCode";
 import {StreamState} from "./StreamState";
 import {Writable} from "../Utils";
 
+type WriterCallback<B extends boolean> = (write: (B extends true ? ((data: ArrayBuffer) => void) :
+    ((data: any, processComplexTypes?: boolean) => void)),end: (B extends true ? ((data?: ArrayBuffer) => void) :
+    ((data?: any, processComplexTypes?: boolean) => void))) => void | Promise<void>
+
 interface TimeoutOption {
     /**
      * @description
@@ -30,7 +34,7 @@ interface TimeoutOption {
     sizePermissionTimeout?: number | null,
     /**
      * @description
-     * When the WriteStream sends the last chunk or the EOF indicator,
+     * When the WriteStream sends the end indicator,
      * the ReadStream will close the WriteStream successfully when all chunks
      * have been processed without an error.
      * It does not mean that all chunks on the ReadStream side need to be read;
@@ -99,27 +103,25 @@ export default class WriteStream<B extends boolean = false> {
     constructor(binary?: B,timeouts?: TimeoutOption) {
         this.binary = binary || false;
         this.write = (binary ? this.binaryWrite.bind(this) : this.objectWrite.bind(this)) as any;
-        this.writeLast = (binary ? this.binaryWriteLast.bind(this) :
-            this.objectWriteLast.bind(this)) as any;
+        this.end = (binary ? this.binaryEnd.bind(this) :
+            this.objectEnd.bind(this)) as any;
         if(timeouts) Object.assign(this,timeouts);
     }
 
     /**
      * @description
-     * An alternative to manually calling write or write last and checking the return value.
+     * An alternative to manually calling write or end and checking the return value.
      * The provided callback will be called every time when the previous write was successful
-     * and was not an EOF indication.
-     * @param loop
+     * and was not an end call.
+     * @param callback
      */
-    setWriter(loop: (write: (B extends true ? ((data: ArrayBuffer | null) => void) :
-        ((data: any | null, processComplexTypes?: boolean) => void))) => void | Promise<void>)
-    {
+    useWriter(callback: WriterCallback<B>) {
         const write = (...args: any) => {
-            (this.write as any)(...args).then((result) => {
-                if(result && args[0] != null) loop(write as any);
-            })
+            (this.write as any)(...args).then(result => {
+                if(result) callback(write as any,this.end);
+            });
         };
-        loop(write as any);
+        callback(write as any,this.end);
     }
 
     private get remainingSizeAllowed(): number {
@@ -200,15 +202,10 @@ export default class WriteStream<B extends boolean = false> {
             this._resolveSizePermissionWait();
     }
 
-    private async binaryWrite(data: ArrayBuffer | null): Promise<boolean> {
+    private async binaryWrite(data: ArrayBuffer): Promise<boolean> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this.state !== StreamState.Open) await this.opened;
-        if(data === null) {
-            this._sendObjectChunk(null);
-            this._onEOFSend();
-            return true;
-        }
         let availableSize = this.remainingSizeAllowed;
         if(data.byteLength <= availableSize) this._sendBinaryChunk(new Uint8Array(data));
         else {
@@ -231,16 +228,11 @@ export default class WriteStream<B extends boolean = false> {
         return true;
     }
 
-    private async objectWrite(data: any | null, processComplexTypes?: boolean): Promise<boolean> {
+    private async objectWrite(data: any, processComplexTypes?: boolean): Promise<boolean> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this.state !== StreamState.Open) await this.opened;
 
-        if(data === null) {
-            this._sendObjectChunk(null);
-            this._onEOFSend();
-            return true;
-        }
         if(this.remainingSizeAllowed > 0) this._sendObjectChunk(data,processComplexTypes);
         else {
             try {
@@ -266,25 +258,29 @@ export default class WriteStream<B extends boolean = false> {
     readonly write: (B extends true ? ((data: ArrayBuffer | null) => Promise<boolean>) :
         ((data: any | null, processComplexTypes?: boolean) => Promise<boolean>));
 
-    private async binaryWriteLast(data: ArrayBuffer): Promise<boolean> {
+    private async binaryEnd(data?: ArrayBuffer): Promise<boolean> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this.state !== StreamState.Open) await this.opened;
-        if(data.byteLength <= this.remainingSizeAllowed)
+
+        if(data == null) this._transport._sendStreamEnd(this._id);
+        else if(data.byteLength <= this.remainingSizeAllowed)
             this._sendBinaryChunk(new Uint8Array(data),true);
         else {
             if(!await this.write(data)) return false;
-            this._sendObjectChunk(null);
+            this._transport._sendStreamEnd(this._id);
         }
         this._onEOFSend();
         return true;
     }
 
-    private async objectWriteLast(data: any, processComplexTypes?: boolean): Promise<boolean>
+    private async objectEnd(data?: any, processComplexTypes?: boolean): Promise<boolean>
     {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this.state !== StreamState.Open) await this.opened;
+
+        if(data === undefined) this._transport._sendStreamEnd(this._id);
         if(this.remainingSizeAllowed > 0) this._sendObjectChunk(data,processComplexTypes,true);
         else {
             try {
@@ -301,25 +297,26 @@ export default class WriteStream<B extends boolean = false> {
 
     /**
      * @description
-     * Writes a chunk with EOF indication.
+     * Ends the stream.
+     * You optionally can write a last chunk.
      * Don't call this method when the previous write promise is not resolved yet.
-     * The returned promise resolves to true when the write has been transmitted successfully and
-     * to false when the write failed because of closure; you then should also stop further writing.
+     * The returned promise resolves to true when the package/s has been transmitted successfully and
+     * to false when the operation failed because of closure.
      * The WriteStream will close with a successful state when the ReadStream has
      * informed the WriteStream that all chunks have been processed successfully.
      * In optimal cases, the method packages the chunk and EOF indication in a single package.
      */
-    readonly writeLast: (B extends true ? ((data: ArrayBuffer) => Promise<boolean>) :
-        ((data: any, processComplexTypes?: boolean) => Promise<boolean>));
+    readonly end: (B extends true ? ((data?: ArrayBuffer) => Promise<boolean>) :
+        ((data?: any, processComplexTypes?: boolean) => Promise<boolean>));
 
-    private _sendBinaryChunk(data: Uint8Array,last?: boolean) {
+    private _sendBinaryChunk(data: Uint8Array,end?: boolean) {
         this._sentSize += data.byteLength;
-        this._transport._sendBinaryStreamChunk(this._id,data,last);
+        this._transport._sendBinaryStreamChunk(this._id,data,end);
     }
 
-    private _sendObjectChunk(data: any, processComplexTypes?: boolean, last?: boolean) {
+    private _sendObjectChunk(data: any, processComplexTypes?: boolean, end?: boolean) {
         this._sentSize += 1;
-        this._transport._sendStreamChunk(this._id,data,processComplexTypes,last);
+        this._transport._sendStreamChunk(this._id,data,processComplexTypes,end);
     }
 
     private _onEOFSend() {
@@ -354,8 +351,7 @@ export default class WriteStream<B extends boolean = false> {
 
     /**
      * Use this method to close the Write- and Read-Stream in case of an error immediately.
-     * When you have sent all chunks, don't use this method and
-     * indicate the EOF with a null or by using the write last method.
+     * To indicate that all chunks have been sent you should use the end method and not the close method.
      * @param errorCode
      */
     close(errorCode: StreamErrorCloseCode | number) {

@@ -256,8 +256,8 @@ export default class Transport {
         }
         else if(header === PacketType.StreamChunk)
             this._processBinaryStreamChunk((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9));
-        else if(header === PacketType.StreamLastChunk)
-            this._processBinaryStreamChunk((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9),true);
+        else if(header === PacketType.StreamEnd)
+            this._processBinaryStreamEnd((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9));
         else this.onInvalidMessage(new Error('Unknown binary package header type.'))
     }
 
@@ -288,7 +288,7 @@ export default class Transport {
                 return;
             case PacketType.StreamChunk: return this._processJsonStreamChunk(packet['1'],packet['2'],packet['3']);
             case PacketType.StreamDataPermission: return this._processStreamDataPermission(packet['1'],packet['2']);
-            case PacketType.StreamLastChunk: return this._processJsonStreamChunk(packet['1'],packet['2'],packet['3'],true);
+            case PacketType.StreamEnd: return this._processJsonStreamEnd(packet['1'],packet['2'],packet['3']);
             case PacketType.InvokeErrResp: return this._rejectInvoke(packet['1'],packet['2']);
             case PacketType.ReadStreamClose: return this._processReadStreamClose(packet['1'], packet['2']);
             case PacketType.StreamAccept: return this._processStreamAccept(packet['1'],packet['2']);
@@ -331,21 +331,38 @@ export default class Transport {
         if(stream) stream._close(code);
     }
 
-    private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any, last?: boolean) {
+    private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
             if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
                 throw new Error('Streams in chunks are not allowed.');
             stream._pushChunk(this._processData(dataType,data),dataType);
-            if(last) stream._pushChunk(null,DataType.JSON);
         }
     }
 
-    private _processBinaryStreamChunk(streamId: number, binary: ArrayBuffer, last?: boolean) {
+    private _processJsonStreamEnd(streamId: number, dataType?: DataType, data?: any) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
+            if(typeof dataType === 'number') {
+                if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
+                    throw new Error('Streams in chunks are not allowed.');
+                stream._pushChunk(this._processData(dataType,data),dataType);
+            }
+            stream._end();
+        }
+    }
+
+    private _processBinaryStreamChunk(streamId: number, binary: ArrayBuffer) {
+        const stream = this._activeReadStreams[streamId];
+        if(stream) stream._pushChunk(binary,DataType.Binary);
+    }
+
+    private _processBinaryStreamEnd(streamId: number, binary: ArrayBuffer) {
+        const stream = this._activeReadStreams[streamId];
+        if(stream) {
+            //Binary stream end package chunk is required.
             stream._pushChunk(binary,DataType.Binary);
-            if(last) stream._pushChunk(null,DataType.JSON);
+            stream._end();
         }
     }
 
@@ -884,29 +901,29 @@ export default class Transport {
      * @param streamId
      * @param data
      * @param processComplexTypes
-     * @param last
+     * @param end
      * @private
      */
-    _sendStreamChunk(streamId: number, data: any, processComplexTypes?: boolean, last?: boolean) {
+    _sendStreamChunk(streamId: number, data: any, processComplexTypes?: boolean, end?: boolean) {
         if(!processComplexTypes) {
-            this.send((last ? PacketType.StreamLastChunk : PacketType.StreamChunk) +
+            this.send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
         else if(Transport.chunksCanContainStreams && data instanceof WriteStream){
             const streamId = this._getNewStreamId(data.binary);
-            this.send((last ? PacketType.StreamLastChunk : PacketType.StreamChunk) +
+            this.send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.Stream + ',' + streamId);
             data._init(this,streamId);
         }
         else if(data instanceof ArrayBuffer) this.send(
-            Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),last));
+            Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),end));
         else {
             const packets: (string | ArrayBuffer)[] = [];
             const streams: any[] = [];
             packets.length = 1;
             data = this._processMixedJSONDeep(data,packets,streams);
 
-            packets[0] = (last ? PacketType.StreamLastChunk : PacketType.StreamChunk) +
+            packets[0] = (end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + parseJSONDataType(packets.length > 1 || streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
             for(let i = 0; i < packets.length; i++) this.send(packets[i])
@@ -919,13 +936,23 @@ export default class Transport {
      * Useful to send a binary stream chunk
      * packet directly (faster than using _sendStreamChunk).
      */
-    _sendBinaryStreamChunk(streamId: number, binaryPart: Uint8Array, last?: boolean) {
-        this.send(Transport._createBinaryStreamChunkPacket(streamId,binaryPart,last))
+    _sendBinaryStreamChunk(streamId: number, binaryPart: Uint8Array, end?: boolean) {
+        this.send(Transport._createBinaryStreamChunkPacket(streamId,binaryPart,end))
     }
 
-    private static _createBinaryStreamChunkPacket(streamId: number, binary: Uint8Array, last?: boolean): ArrayBuffer {
+    /**
+     * @internal
+     * @description
+     * Sends a stream end without any data.
+     * @param streamId
+     */
+    _sendStreamEnd(streamId: number) {
+        this.send(PacketType.StreamEnd + ',' + streamId);
+    }
+
+    private static _createBinaryStreamChunkPacket(streamId: number, binary: Uint8Array, end?: boolean): ArrayBuffer {
         const packetBuffer = new Uint8Array(9 + binary.byteLength);
-        packetBuffer[0] = last ? PacketType.StreamLastChunk : PacketType.StreamChunk;
+        packetBuffer[0] = end ? PacketType.StreamEnd : PacketType.StreamChunk;
         packetBuffer.set(new Uint8Array((new Float64Array([streamId])).buffer),1);
         packetBuffer.set(binary,9);
         return packetBuffer.buffer;
