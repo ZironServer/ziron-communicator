@@ -244,7 +244,7 @@ describe('Ziron', () => {
         const chunk2 = new ArrayBuffer(25);
         writtenCode = [chunk1,chunk2];
         await writeStream.write(chunk1,true);
-        await writeStream.writeLast(chunk2,true);
+        await writeStream.end(chunk2,true);
       })()
 
       const car = {avatar: new ArrayBuffer(20), model: 'X1', hp: 500, code: writeStream};
@@ -281,7 +281,7 @@ describe('Ziron', () => {
           const chunk2 = new ArrayBuffer(25);
           writtenCode = [chunk1,chunk2];
           writeStream.write(chunk1,true);
-          writeStream.writeLast(chunk2,true);
+          writeStream.end(chunk2,true);
         })();
         tv = {avatar: new ArrayBuffer(20), model: 'Y1', code: writeStream};
         end(tv,true);
@@ -475,9 +475,9 @@ describe('Ziron', () => {
             else await (writeStream as WriteStream<true>).write(test.data[i]);
           }
           if(!test.binary) (writeStream as WriteStream<false>)
-              .writeLast(test.data[test.data.length - 1],test.processComplexTypes);
+              .end(test.data[test.data.length - 1],test.processComplexTypes);
           else (writeStream as WriteStream<true>)
-              .writeLast(test.data[test.data.length - 1]);
+              .end(test.data[test.data.length - 1]);
         })();
 
         comB1.onTransmit = async (event, data: ReadStream, type) => {
@@ -510,10 +510,10 @@ describe('Ziron', () => {
 
     it("A's write stream should be closed when B closes the read stream.", (done) => {
       const writeStream = new WriteStream();
-      writeStream.onClose = (code) => {
+      writeStream.closed.then((code) => {
         expect(code).to.be.equal(505);
         done();
-      };
+      });
       comB1.onTransmit = (event, data: ReadStream, type) => {
         expect(event).to.be.equal('readStreamClose');
         expect(type).to.be.equal(DataType.Stream);
@@ -527,8 +527,8 @@ describe('Ziron', () => {
       const writeStream = new WriteStream();
       const result: number[] = [];
       let i = 1;
-      writeStream.setWriter(write => {
-        if(i > 10) return write(null);
+      writeStream.useWriter((write, end) => {
+        if(i > 10) return end();
         result.push(i);
         write(i++)
       });
@@ -547,8 +547,8 @@ describe('Ziron', () => {
     it("The chunk middleware should be able to update chunks.", (done) => {
       const writeStream = new WriteStream(true);
       let i = 1;
-      writeStream.setWriter(write => {
-        if(i > 3) return write(null);
+      writeStream.useWriter((write, end) => {
+        if(i > 3) return end();
         write(new ArrayBuffer(i++))
       });
 
@@ -575,10 +575,10 @@ describe('Ziron', () => {
 
     it("Ignored read stream should end write stream with an accept timeout.", (done) => {
       const writeStream = new WriteStream(false,{acceptTimeout: 60});
-      writeStream.onClose = (code) => {
+      writeStream.closed.then((code) => {
         expect(code).to.be.equal(StreamErrorCloseCode.AcceptTimeout);
         done();
-      };
+      });
       comB1.onTransmit = (event,data: ReadStream) => {
         expect(event).to.be.equal('streamAcceptTimeout');
       };
@@ -591,10 +591,10 @@ describe('Ziron', () => {
       comB1.onTransmit = (event,data: ReadStream) => {
         expect(event).to.be.equal('streamChunkTimeout');
 
-        data.onClose = (code) => {
+        data.closed.then((code) => {
           expect(code).to.be.equal(StreamErrorCloseCode.ChunkTimeout);
           done();
-        }
+        });
         data.accept({
           bufferSize: 6,
           chunkTimeout: 60
@@ -608,10 +608,10 @@ describe('Ziron', () => {
       const writeStream = new WriteStream(false,{
         sizePermissionTimeout: 50
       });
-      writeStream.onClose = (code) => {
+      writeStream.closed.then((code) => {
         expect(code).to.be.equal(StreamErrorCloseCode.SizePermissionTimeout);
         done();
-      }
+      });
 
       comB1.onTransmit = (event,data: ReadStream) => {
         expect(event).to.be.equal('sizePermissionTimeout');
@@ -622,7 +622,7 @@ describe('Ziron', () => {
       comA1.transmit('sizePermissionTimeout',writeStream,{processComplexTypes: true});
 
       let i = 0;
-      writeStream.setWriter((write) =>  {
+      writeStream.useWriter((write) =>  {
         write(i > 50 ? null : i++);
       });
     });
@@ -631,10 +631,10 @@ describe('Ziron', () => {
       const writeStream = new WriteStream(false,{
         endClosureTimeout: 50
       });
-      writeStream.onClose = (code) => {
+      writeStream.closed.then((code) => {
         expect(code).to.be.equal(StreamErrorCloseCode.EndClosureTimeout);
         done();
-      }
+      });
 
       comB1.onTransmit = (event,data: ReadStream) => {
         expect(event).to.be.equal('endClosureTimeout');
@@ -649,7 +649,7 @@ describe('Ziron', () => {
 
       (async () => {
         await writeStream.write(1);
-        await writeStream.write(null);
+        await writeStream.end();
       })()
     });
 
@@ -663,11 +663,11 @@ describe('Ziron', () => {
         expect(data).to.be.instanceOf(ReadStream);
         expect(data.state).to.be.equal(StreamState.Pending);
 
-        data.onClose = (code) => {
+        data.closed.then((code) => {
           expect(code).to.be.equal(StreamErrorCloseCode.BadConnection);
           done();
           comB1.emitOpen();
-        };
+        });
         data.accept();
       };
 
@@ -687,15 +687,15 @@ describe('Ziron', () => {
         const writeStream = new WriteStream(test.binary);
 
         let i = 1;
-        writeStream.setWriter(write => {
+        writeStream.useWriter(write => {
           write(i < 10 ?
               (test.binary ? new ArrayBuffer(i++) : i++) as any : null);
         })
 
-        writeStream.onClose = (code) => {
+        writeStream.closed.then((code) => {
           expect(code).to.be.equal(StreamErrorCloseCode.SizeLimitExceeded);
           done();
-        }
+        });
 
         comB1.onTransmit = (event,data: ReadStream) => {
           expect(event).to.be.equal('streamSizeLimit');
