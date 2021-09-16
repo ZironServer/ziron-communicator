@@ -66,24 +66,6 @@ export default class WriteStream<B extends boolean = false> {
 
     private _writeLock: boolean = false;
 
-    /**
-     * @description
-     * A listener that gets called when the stream is open.
-     */
-    public onOpen: () => void | Promise<any> = () => {};
-    /**
-     * @description
-     * A listener that gets called when the stream is closed.
-     * An error code is provided when the stream is closed because of an error.
-     */
-    public onClose: (errorCode?: StreamErrorCloseCode | number) => void | Promise<any> = () => {};
-     /**
-     * @description
-     * Is called whenever one of the listeners
-     * (onOpen,onClose) have thrown an error.
-     */
-    public onListenerError?: (err: Error) => void;
-
     private _closePromiseResolve: (errorCode: StreamErrorCloseCode | number | undefined) => void;
 
     /**
@@ -182,8 +164,6 @@ export default class WriteStream<B extends boolean = false> {
 
         clearTimeout(this._acceptTimeoutTicker);
         (this as Writable<WriteStream>).state = StreamState.Open;
-        try {this.onOpen()}
-        catch(err) {this._onListenerError(err)}
         this._openedPromiseResolve();
         this._allowSize(bufferSize);
     }
@@ -218,13 +198,6 @@ export default class WriteStream<B extends boolean = false> {
         this._allowedSize += size;
         if(this._resolveSizePermissionWait)
             this._resolveSizePermissionWait();
-    }
-
-    private _onListenerError(err: Error) {
-        if(this.onListenerError) {
-            try {this.onListenerError(err)}
-            catch(_) {}
-        }
     }
 
     private async binaryWrite(data: ArrayBuffer | null): Promise<boolean> {
@@ -398,8 +371,6 @@ export default class WriteStream<B extends boolean = false> {
         clearTimeout(this._acceptTimeoutTicker);
         clearTimeout(this._endClosureTimeoutTicker);
         if(rmFromTransport) this._transport._removeWriteStream(this._id);
-        try {this.onClose(errorCode)}
-        catch(err) {this._onListenerError(err)}
         if(this._resolveSizePermissionWait)
             this._resolveSizePermissionWait(new Error("Stream is closed."));
         this._closePromiseResolve(errorCode);

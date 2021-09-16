@@ -97,19 +97,6 @@ export default class ReadStream {
      */
     public chunkMiddleware?: (chunk: any, updateChunk: (chunk: any) => void, type: DataType) => boolean | Promise<boolean>;
 
-    /**
-     * @description
-     * A listener that gets called when the stream is closed.
-     * An error code is provided when the stream is closed because of an error.
-     */
-    public onClose: (errorCode?: StreamErrorCloseCode | number) => void | Promise<any> = () => {};
-     /**
-     * @description
-     * Is called whenever one of the listener
-     * (onClose) have thrown an error.
-     */
-    public onListenerError?: (err: Error) => void;
-
     private _closedPromiseResolve: (errorCode?: StreamErrorCloseCode | number) => void;
 
     /**
@@ -329,14 +316,6 @@ export default class ReadStream {
         clearTimeout(this._chunkTimeoutTick);
     }
 
-
-    private _onListenerError(err: Error) {
-        if(this.onListenerError) {
-            try {this.onListenerError(err)}
-            catch(_) {}
-        }
-    }
-
     /**
      * @internal
      */
@@ -434,8 +413,6 @@ export default class ReadStream {
             resolve(null);
         }
         if(rmFromTransport) this._transport._removeReadStream(this.id);
-        try {this.onClose(errorCode);}
-        catch(err) {this._onListenerError(err)}
         this._closedPromiseResolve(errorCode);
     }
 
