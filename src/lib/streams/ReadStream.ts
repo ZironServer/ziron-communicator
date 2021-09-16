@@ -347,6 +347,10 @@ export default class ReadStream {
             }
 
             const size = this.binary ? (chunk as ArrayBuffer).byteLength : 1;
+
+            //Skip empty binary chunks
+            if(size <= 0) return;
+
             if(
                 (this._sizeLimit != null && (this._receivedSize + size) > this._sizeLimit) ||
                 (size + this._receivedSize > this._allowedSize)
