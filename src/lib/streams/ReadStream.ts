@@ -42,7 +42,7 @@ interface ReadStreamOptions {
     sizeLimit?: number | null;
 }
 
-export default class ReadStream {
+export default class ReadStream<T = any> {
 
     /**
      * @description
@@ -56,7 +56,7 @@ export default class ReadStream {
      */
     public readonly accepted: boolean;
 
-    private readPromise: Promise<any> | null;
+    private readPromise: Promise<T> | null;
     private readResolve: ((chunk: any) => void) | null;
 
     private _sizeLimit?: number | null;
@@ -95,7 +95,7 @@ export default class ReadStream {
      * It doesn't matter if you increase the size of the chunk in the middleware.
      * Only the size when the chunk was received is used.
      */
-    public chunkMiddleware?: (chunk: any, updateChunk: (chunk: any) => void, type: DataType) => boolean | Promise<boolean>;
+    public chunkMiddleware?: (chunk: any, updateChunk: (chunk: T) => void, type: DataType) => boolean | Promise<boolean>;
 
     private _closedPromiseResolve: (errorCode?: StreamErrorCloseCode | number) => void;
 
@@ -263,7 +263,7 @@ export default class ReadStream {
      * but the read method can still return chunks from the buffer.
      * So use the return value as an indicator and not the stream state.
      */
-    read(): Promise<ArrayBuffer | string | any | null> {
+    read(): Promise<T | null> {
         if(!this.accepted) {
             if(this.state === StreamState.Pending) throw new Error("Accept ReadStream before start reading.");
             else {
@@ -295,8 +295,8 @@ export default class ReadStream {
      * The method throws an StreamCloseError when the stream is closed with an error.
      * @throws StreamCloseError
      */
-    async readAll(): Promise<ArrayBuffer[] | any[]> {
-        const buffer: ArrayBuffer[] | any[] = [];
+    async readAll(): Promise<T[]> {
+        const buffer: T[] = [];
         let chunk = await this.read();
         while (chunk != null) {
             buffer.push(chunk);
@@ -328,7 +328,7 @@ export default class ReadStream {
     /**
      * @internal
      */
-    _pushChunk(chunk: Promise<any> | ArrayBuffer | null, type: DataType) {
+    _pushChunk(chunk: Promise<T> | ArrayBuffer, type: DataType) {
         if(this.state === StreamState.Open && !this._chainEnd) {
             this._chainChunkSize++;
             this._clearChunkTimeout();
@@ -364,7 +364,7 @@ export default class ReadStream {
                 (size + this._receivedSize > this._allowedSize)
             ) return this.close(StreamErrorCloseCode.SizeLimitExceeded);
 
-            if(this.chunkMiddleware && !await this.chunkMiddleware(chunk,c => chunk = c,type)) {
+            if(this.chunkMiddleware && !await this.chunkMiddleware(chunk,c => chunk = c as any,type)) {
                 this.close(StreamErrorCloseCode.InvalidChunk);
                 return this._transport.onInvalidMessage(new Error('Invalid stream chunk.'));
             }
