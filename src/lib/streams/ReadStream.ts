@@ -136,6 +136,14 @@ export default class ReadStream {
 
     /**
      * @description
+     * Indicates if this is a object stream.
+     */
+    public get object(): boolean {
+        return !this.binary;
+    }
+
+    /**
+     * @description
      * Returns if the ReadStream has been closed without an error code.
      */
     get successfullyClosed(): boolean {

@@ -57,6 +57,15 @@ export default class WriteStream<B extends boolean = false> {
      * Indicates if this is a binary stream.
      */
     public readonly binary: boolean;
+
+    /**
+     * @description
+     * Indicates if this is a object stream.
+     */
+    public get object(): boolean {
+        return !this.binary;
+    }
+
     /**
      * @description
      * The current state of the stream.
