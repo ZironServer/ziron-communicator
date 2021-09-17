@@ -653,6 +653,24 @@ describe('Ziron', () => {
       })()
     });
 
+    it("WriteStream should reject write and end calls when end was already called.", async () => {
+      const writeStreamObj = new WriteStream(false);
+      const writeStreamBin = new WriteStream(true);
+
+      comB1.onTransmit = (event,data: ReadStream[]) => {
+        expect(event).to.be.equal('writeStreams');
+        data.forEach(stream => stream.accept());
+      };
+      comA1.transmit('writeStreams',[writeStreamObj,writeStreamBin],
+          {processComplexTypes: true});
+
+      await Promise.all([writeStreamObj,writeStreamBin].map(async (stream) => {
+        await stream.end(new ArrayBuffer(10));
+        await expect(stream.end()).to.be.rejectedWith(Error);
+        await expect(stream.write(new ArrayBuffer(10))).to.be.rejectedWith(Error);
+      }));
+    });
+
     it('Transmit a stream and a connection lost on B after sending should close the ReadStream after accepting.', (done) => {
 
       let simulatedBadConnectionPromise;
