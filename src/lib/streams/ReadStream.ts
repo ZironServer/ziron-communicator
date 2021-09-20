@@ -42,7 +42,7 @@ interface ReadStreamOptions {
     sizeLimit?: number | null;
 }
 
-type ChunkMiddleware<T = any> = (chunk: any, updateChunk: (chunk: T) => void, type: DataType) => boolean | Promise<boolean>;
+export type ChunkMiddleware<T = any> = (chunk: any, updateChunk: (chunk: T) => void, type: DataType) => boolean | Promise<boolean>;
 
 export default class ReadStream<T = any> {
 

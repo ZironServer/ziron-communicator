@@ -12,7 +12,7 @@ import Transport, {
     PreparedPackage,
     ComplexTypesOption
 } from "./lib/Transport";
-import ReadStream from "./lib/streams/ReadStream";
+import ReadStream, {ChunkMiddleware} from "./lib/streams/ReadStream";
 import {StreamErrorCloseCode} from "./lib/streams/StreamErrorCloseCode";
 import {StreamState} from "./lib/streams/StreamState";
 import {DataType, analyseTypeofData, containsStreams, isMixedJSONDataType} from "./lib/DataType";
@@ -32,6 +32,7 @@ export {
     JSONString,
     WriteStream,
     ReadStream,
+    ChunkMiddleware,
     StreamCloseError,
     StreamErrorCloseCode,
     StreamState,
