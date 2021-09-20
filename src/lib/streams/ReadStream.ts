@@ -42,6 +42,8 @@ interface ReadStreamOptions {
     sizeLimit?: number | null;
 }
 
+type ChunkMiddleware<T = any> = (chunk: any, updateChunk: (chunk: T) => void, type: DataType) => boolean | Promise<boolean>;
+
 export default class ReadStream<T = any> {
 
     /**
@@ -59,6 +61,18 @@ export default class ReadStream<T = any> {
     private readPromise: Promise<T> | null;
     private readResolve: ((chunk: any) => void) | null;
 
+    /**
+     * @description
+     * Sets a size limit for the stream.
+     * If the limit is exceeded, the stream will be closed with an error.
+     * In binary mode, the limit is specified in bytes and in object mode in the count of objects.
+     * When setting this option to null unlimited data
+     * can be transmitted through the stream.
+     * @default null
+     */
+    public set sizeLimit(sizeLimit: number | null) {
+        this._sizeLimit = sizeLimit;
+    }
     private _sizeLimit?: number | null;
 
     private _buffer: LinkedBuffer
@@ -95,7 +109,10 @@ export default class ReadStream<T = any> {
      * It doesn't matter if you increase the size of the chunk in the middleware.
      * Only the size when the chunk was received is used.
      */
-    public chunkMiddleware?: (chunk: any, updateChunk: (chunk: T) => void, type: DataType) => boolean | Promise<boolean>;
+    public set chunkMiddleware(middleware: ChunkMiddleware<T> | undefined) {
+        this._chunkMiddleware = middleware;
+    }
+    private _chunkMiddleware?: ChunkMiddleware<T>;
 
     private _closedPromiseResolve: (errorCode?: StreamErrorCloseCode | number) => void;
 
@@ -166,7 +183,7 @@ export default class ReadStream<T = any> {
         }
 
         //init
-        this._sizeLimit = sizeLimit;
+        if(sizeLimit !== undefined) this.sizeLimit = sizeLimit;
         this._bufferSizeLimit = bufferSize ?
             Math.max(1,bufferSize) : (this.binary ? 16384 : 8);
         this._buffer = new LinkedBuffer();
@@ -364,7 +381,7 @@ export default class ReadStream<T = any> {
                 (size + this._receivedSize > this._allowedSize)
             ) return this.close(StreamErrorCloseCode.SizeLimitExceeded);
 
-            if(this.chunkMiddleware && !await this.chunkMiddleware(chunk,c => chunk = c as any,type)) {
+            if(this._chunkMiddleware && !await this._chunkMiddleware(chunk, c => chunk = c as any,type)) {
                 this.close(StreamErrorCloseCode.InvalidChunk);
                 return this._transport.onInvalidMessage(new Error('Invalid stream chunk.'));
             }
