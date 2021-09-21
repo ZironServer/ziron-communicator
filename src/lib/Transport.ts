@@ -33,7 +33,7 @@ export type InvokeListener = (procedure: string, data: any, end: (data?: any, pr
 export type PreparedPackage = (string | ArrayBuffer)[] & {
     /**
      * @description
-     * Used to open write streams.
+     * Used to set the ack timeout.
      * @internal
      */
     _afterSend?: () => void;
@@ -734,11 +734,17 @@ export default class Transport {
                 return preparedPackage;
             }
             else {
-                preparedPackage._afterSend = setResponse;
                 preparedPackage.length = 1;
                 const streams = [];
                 data = this._processMixedJSONDeep(data,preparedPackage,streams);
-                if(streams.length > 0) Promise.all(streams).then(setResponseTimeout)
+                if(streams.length > 0) {
+                    preparedPackage._afterSend = setResponse;
+                    Promise.all(streams).then(setResponseTimeout)
+                }
+                else preparedPackage._afterSend = () => {
+                    setResponse!();
+                    setResponseTimeout!();
+                }
                 preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                     parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
                     (data !== undefined ? (',' + encodeJson(data)) : '');
