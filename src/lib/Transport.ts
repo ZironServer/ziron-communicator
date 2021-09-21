@@ -501,7 +501,7 @@ export default class Transport {
         return packetBuffer.buffer;
     }
 
-    private _processMixedJSONDeep(data: any, binaryReferencePackets: any[], streamClosed: Promise<any>[]) {
+    private _processMixedJSONDeep(data: any, binaryReferencePackets: any[], streams: WriteStream<any>[]) {
         if(typeof data === 'object' && data){
             if(data instanceof ArrayBuffer){
                 const placeholderId = this._getNewBinaryPlaceholderId();
@@ -512,7 +512,7 @@ export default class Transport {
                 if(Transport.streamsEnabled){
                     const streamId = this._getNewStreamId(data.binary);
                     data._init(this,streamId);
-                    streamClosed.push(data.closed);
+                    streams.push(data);
                     return {__stream__: streamId}
                 }
                 else return data.toJSON();
@@ -521,7 +521,7 @@ export default class Transport {
                 const newArray: any[] = [];
                 const len = data.length;
                 for (let i = 0; i < len; i++) {
-                    newArray[i] = this._processMixedJSONDeep(data[i], binaryReferencePackets, streamClosed);
+                    newArray[i] = this._processMixedJSONDeep(data[i], binaryReferencePackets, streams);
                 }
                 return newArray;
             }
@@ -529,7 +529,7 @@ export default class Transport {
                 const clone = {};
                 for(const key in data) {
                     // noinspection JSUnfilteredForInLoop
-                    clone[key] = this._processMixedJSONDeep(data[key], binaryReferencePackets, streamClosed);
+                    clone[key] = this._processMixedJSONDeep(data[key], binaryReferencePackets, streams);
                 }
                 return clone;
             }
@@ -714,11 +714,15 @@ export default class Transport {
             });
 
             if(data instanceof WriteStream && Transport.streamsEnabled){
-                preparedPackage._afterSend = setResponse;
+                const sent = new Promise(res => preparedPackage._afterSend = () => {
+                    setResponse!();
+                    res();
+                    (data as WriteStream<any>)._onTransmitted();
+                });
                 const streamId = this._getNewStreamId(data.binary);
                 preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                     DataType.Stream + ',' + streamId;
-                data.closed.then(setResponseTimeout);
+                Promise.all([sent,data.closed]).then(setResponseTimeout);
                 data._init(this,streamId);
                 return preparedPackage;
             }
@@ -735,11 +739,15 @@ export default class Transport {
             }
             else {
                 preparedPackage.length = 1;
-                const streams = [];
+                const streams: WriteStream<any>[] = [];
                 data = this._processMixedJSONDeep(data,preparedPackage,streams);
                 if(streams.length > 0) {
-                    preparedPackage._afterSend = setResponse;
-                    Promise.all(streams).then(setResponseTimeout)
+                    const sent = new Promise(res => preparedPackage._afterSend = () => {
+                        setResponse!();
+                        res();
+                        for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();
+                    });
+                    Promise.all([sent,...streams.map(stream => stream.closed)]).then(setResponseTimeout);
                 }
                 else preparedPackage._afterSend = () => {
                     setResponse!();

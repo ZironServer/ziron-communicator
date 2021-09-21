@@ -54,6 +54,12 @@ export default class WriteStream<B extends boolean = false> {
 
     /**
      * @description
+     * Indicates if the WriteStream was sent to the other side.
+     */
+    public readonly transmitted: boolean = false;
+
+    /**
+     * @description
      * Indicates if this is a binary stream.
      */
     public readonly binary: boolean;
@@ -155,6 +161,14 @@ export default class WriteStream<B extends boolean = false> {
         this._id = id;
         (this as Writable<WriteStream>).state = StreamState.Pending;
         this._transport._addWriteStream(id,this);
+    }
+
+    /**
+     * @internal
+     */
+    _onTransmitted() {
+        if(this.transmitted || this.state !== StreamState.Pending) return;
+        (this as Writable<WriteStream>).transmitted = true;
         this._acceptTimeoutTicker = setTimeout(() => this.close(StreamErrorCloseCode.AcceptTimeout),
             this.acceptTimeout);
     }
