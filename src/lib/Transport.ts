@@ -29,8 +29,10 @@ export type InvokeListener = (procedure: string, data: any, end: (data?: any, pr
 
 /**
  * A prepared package contains prepared or multiple packets.
+ * The first packet is always the string header packet,
+ * followed by optional binary packets.
  */
-export type PreparedPackage = (string | ArrayBuffer)[] & {
+export type PreparedPackage = [string,...ArrayBuffer[]] & {
     /**
      * @description
      * Used to set the ack timeout.
