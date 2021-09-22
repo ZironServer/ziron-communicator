@@ -168,12 +168,11 @@ export default class Transport {
                         if(Array.isArray(packets)) {
                             const len = (packets as any[]).length;
                             for(let i = 0; i < len; i++) {
-                                this._processJsonActionPacket(packets[i])
-                                    .catch(this.onInvalidMessage);
+                                this._processJsonActionPacket(packets[i]);
                             }
                         }
                     }
-                    else this._processJsonActionPacket(packet).catch(this.onInvalidMessage);
+                    else this._processJsonActionPacket(packet);
                 }
             }
         }
@@ -266,24 +265,27 @@ export default class Transport {
         catch(err) {this._onListenerError(err)}
     }
 
-    private async _processJsonActionPacket(packet: ActionPacket) {
+    private _processJsonActionPacket(packet: ActionPacket) {
         switch (packet['0']) {
             case PacketType.Transmit:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
-                return this._processTransmit(packet['1'],await this._processData(packet['2'],packet['3']),packet['2']);
+                return this._processData(packet['2'],packet['3'])
+                    .then(data => this._processTransmit(packet['1'],data,packet['2']))
+                    .catch(this.onInvalidMessage);
             case PacketType.Invoke:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
-                return this._processInvoke(this.onInvoke,packet['1'],packet['2'],
-                    await this._processData(packet['3'],packet['4']),packet['3'])
+                return this._processData(packet['3'],packet['4'])
+                    .then(data => this._processInvoke(this.onInvoke,packet['1'],packet['2'],data,packet['3']))
+                    .catch(this.onInvalidMessage);
             case PacketType.InvokeDataResp:
                 const resp = this._invokeResponsePromises[packet['1']];
                 if (resp) {
                     clearTimeout(resp.timeout!);
                     delete this._invokeResponsePromises[packet['1']];
-                    return resp.resolve(resp.returnDataType ?
-                        [await this._processData(packet['2'],packet['3']),packet['2']] :
-                        await this._processData(packet['2'],packet['3']));
+                    return this._processData(packet['2'],packet['3'])
+                        .then(data => resp.resolve(resp.returnDataType ? [data,packet['2']] : data))
+                        .catch(this.onInvalidMessage);
                 }
                 return;
             case PacketType.StreamChunk: return this._processJsonStreamChunk(packet['1'],packet['2'],packet['3']);
@@ -1051,7 +1053,7 @@ export default class Transport {
                 DataType.Binary + ',' + binaryId, Transport._createBinaryReferencePacket(binaryId,data)];
         }
         else {
-            const preparedPackage: PreparedPackage = [];
+            const preparedPackage: PreparedPackage = [] as any;
             preparedPackage.length = 1;
             data = Transport._processMultiMixedJSONDeep(data,preparedPackage);
             preparedPackage[0] = PacketType.Transmit + ',"' + receiver + '",' +
