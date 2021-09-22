@@ -404,6 +404,7 @@ export default class Transport {
             this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.Stream + ',' + streamId);
             data._init(this,streamId);
+            data._onTransmitted();
         }
         else if(data instanceof ArrayBuffer) {
             const binaryId = this._getNewBinaryPlaceholderId();
@@ -412,15 +413,18 @@ export default class Transport {
             this.send(Transport._createBinaryReferencePacket(binaryId,data));
         }
         else {
-            const packets: (string | ArrayBuffer)[] = [];
-            const streams: any[] = [];
-            packets.length = 1;
-            data = this._processMixedJSONDeep(data,packets,streams);
+            const preparedPackage: PreparedPackage = [] as any;
+            const streams: WriteStream<any>[] = [];
+            preparedPackage.length = 1;
+            data = this._processMixedJSONDeep(data,preparedPackage,streams);
 
-            packets[0] = PacketType.InvokeDataResp + ',' + callId + ',' +
-                parseJSONDataType(packets.length > 1, streams.length > 0) +
+            if(streams.length > 0)
+                preparedPackage._afterSend = () => {for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();}
+
+            preparedPackage[0] = PacketType.InvokeDataResp + ',' + callId + ',' +
+                parseJSONDataType(preparedPackage.length > 1, streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
-            for(let i = 0; i < packets.length; i++) this.send(packets[i])
+            for(let i = 0; i < preparedPackage.length; i++) this.send(preparedPackage[i])
         }
     }
 
@@ -643,6 +647,7 @@ export default class Transport {
             const packet: PreparedPackage = [PacketType.Transmit + ',"' + receiver + '",' +
                 DataType.Stream + ',' + streamId];
             data._init(this,streamId);
+            packet._afterSend = () => data._onTransmitted();
             return packet;
         }
         else if(data instanceof ArrayBuffer) {
@@ -651,10 +656,14 @@ export default class Transport {
                 DataType.Binary + ',' + binaryId, Transport._createBinaryReferencePacket(binaryId,data)];
         }
         else {
-            const preparedPackage: PreparedPackage = [];
-            const streams: any[] = [];
+            const preparedPackage: PreparedPackage = [] as any;
+            const streams: WriteStream<any>[] = [];
             preparedPackage.length = 1;
             data = this._processMixedJSONDeep(data,preparedPackage,streams);
+
+            if(streams.length > 0)
+                preparedPackage._afterSend = () => {for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();}
+
             preparedPackage[0] = PacketType.Transmit + ',"' + receiver + '",' +
                 parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
@@ -911,6 +920,7 @@ export default class Transport {
 
     /**
      * Only use when the connection was not lost in-between time.
+     * It sends the chunk directly.
      * @internal
      * @param streamId
      * @param data
@@ -928,12 +938,13 @@ export default class Transport {
             this.send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.Stream + ',' + streamId);
             data._init(this,streamId);
+            data._onTransmitted();
         }
         else if(data instanceof ArrayBuffer) this.send(
             Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),end));
         else {
             const packets: (string | ArrayBuffer)[] = [];
-            const streams: any[] = [];
+            const streams: WriteStream<any>[] = [];
             packets.length = 1;
             data = this._processMixedJSONDeep(data,packets,streams);
 
@@ -941,6 +952,7 @@ export default class Transport {
                 ',' + streamId + ',' + parseJSONDataType(packets.length > 1 || streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
             for(let i = 0; i < packets.length; i++) this.send(packets[i])
+            for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();
         }
     }
 
