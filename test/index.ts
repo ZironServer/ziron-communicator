@@ -834,10 +834,37 @@ describe('Ziron', () => {
         if(receivedI === count) done();
       };
 
-      comA1.maxBufferChunkLength = 5
-      comA1.limitBatchStringPacketLength = 2
+      comA1.maxBufferChunkLength = 5;
+      comA1.limitBatchStringPacketLength = 2;
       for(let i = 0; i < count; i++){
         comA1.transmit('batch','msg',{batch: 50});
+      }
+      comA1.maxBufferChunkLength = undefined;
+    });
+
+    it('Batch package order should not be messed up.', (done) => {
+      const sendMessages: any[] = [];
+      const receivedMessages: any[] = [];
+      const dataLength = 211;
+
+      let receivedI = 0;
+      comB1.onTransmit = (event,data) => {
+        expect(event).to.be.equal('batch');
+        receivedI++;
+        receivedMessages.push(data);
+        if(receivedI === dataLength) {
+          expect(receivedMessages).to.be.deep.equal(sendMessages);
+          done();
+        }
+      };
+
+      comA1.maxBufferChunkLength = 20;
+      comA1.limitBatchStringPacketLength = 20000;
+      for(let i = 0; i < dataLength; i++){
+        //send text and binary packages
+        const data = i % 2 === 0 ? new ArrayBuffer(i) : i;
+        sendMessages.push(data);
+        comA1.transmit('batch',data,{batch: 100,processComplexTypes: i % 2 === 0});
       }
       comA1.maxBufferChunkLength = undefined;
     });
