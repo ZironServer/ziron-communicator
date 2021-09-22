@@ -428,8 +428,8 @@ export default class Transport {
         }
     }
 
-    private _processData(type: DataType, data: any): Promise<any> | any {
-        if (type === DataType.JSON) return data;
+    private _processData(type: DataType, data: any): Promise<any> {
+        if (type === DataType.JSON) return Promise.resolve(data);
         else if (type === DataType.Binary) {
             if(typeof data !== 'number') throw new Error('Invalid binary placeholder type.');
             return this._createBinaryResolver(data);
@@ -447,7 +447,7 @@ export default class Transport {
             });
         } else if(type === DataType.Stream && Transport.streamsEnabled) {
             if(typeof data !== 'number') throw new Error('StreamId is not a number.');
-            return new Transport.readStream(data,this);
+            return Promise.resolve(new Transport.readStream(data,this));
         }
         else throw new Error('Invalid data type.');
     }
