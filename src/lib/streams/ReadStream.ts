@@ -79,6 +79,21 @@ export default class ReadStream<T = any> {
     private _bufferSizeLimit: number;
 
     private _allowedSize: number;
+    /**
+     * @description
+     * The size that the stream has processed.
+     * This size contains chunks that are already pushed to the buffer or directly to the reader.
+     * @private
+     */
+    private _processedSize: number;
+    /**
+     * @description
+     * The size that the stream has received.
+     * It can contain unprocessed chunks,
+     * that potentially gets pushed to the buffer or directly to the reader.
+     * This size indicator helps to detect size limit violations faster.
+     * @private
+     */
     private _receivedSize: number;
 
     private _chainEnd: boolean;
@@ -189,6 +204,7 @@ export default class ReadStream<T = any> {
         this._buffer = new LinkedBuffer();
 
         this._allowedSize = this._bufferSizeLimit;
+        this._processedSize = 0;
         this._receivedSize = 0;
 
         this._chain = Promise.resolve();
@@ -242,6 +258,8 @@ export default class ReadStream<T = any> {
          currently used buffer size and the size that can still be added.
          Subtract the potential buffer size from the limit to get the safe available free space.
          If the free space is greater than 20% of the buffer limit, allow the client to send more.
+         After a specific time when the 20% mark is still not reached,
+         the minor permission possible for safe free space is sent.
 
          Example:
 
@@ -249,14 +267,17 @@ export default class ReadStream<T = any> {
          currentBufferSize: 5
 
          Allowed: 40
-         Received: 38
+         Processed: 38
+         It is crucial to use the processedSize, not the received size,
+         because it could contain data that still needs to be pushed to the buffer.
+         But we only want the already processed size that will not be potentially added to the buffer size.
 
          potential buffer size: 5 + (40 - 38) = 7
          free space: 16 - 7 = 9
 
          free space >= (0.2 * 16 = 3.2): yes
          */
-        const freeBufferSize = this._bufferSizeLimit - (this._buffer.size + (this._allowedSize - this._receivedSize));
+        const freeBufferSize = this._bufferSizeLimit - (this._buffer.size + (this._allowedSize - this._processedSize));
         if(freeBufferSize >= (applyMinimum ? 1 : (0.2 * this._bufferSizeLimit))) {
             this._allowedSize += freeBufferSize;
             this._transport._sendStreamAllowMore(this.id,freeBufferSize);
@@ -347,26 +368,10 @@ export default class ReadStream<T = any> {
      */
     _pushChunk(chunk: Promise<T> | ArrayBuffer, type: DataType) {
         if(this.state === StreamState.Open && !this._chainEnd) {
-            this._chainChunkSize++;
-            this._clearChunkTimeout();
-            this._chain = this._chain.then(() => this._chainNextChunk(chunk, type));
-        }
-    }
 
-    private async _chainNextChunk(chunk: Promise<any> | ArrayBuffer | null, type: DataType) {
-        if(this._chainCancel) return;
-        await this._processChunk(chunk,type);
-        this._chainChunkSize--;
-        this._emptyChunksCheck();
-    }
-
-    private async _processChunk(chunk: Promise<any> | ArrayBuffer | null, type: DataType) {
-        try {
-            chunk = await chunk;
-
-            if(this._chainCancel) return;
-
-            if(this.binary && type !== DataType.Binary) {
+            // The chunks in a binary stream are sent via binary
+            // packets to resolving the data async is not needed.
+            if(this.binary && !(chunk instanceof ArrayBuffer)) {
                 this.close(StreamErrorCloseCode.InvalidChunk);
                 return this._transport.onInvalidMessage(new Error('Invalid stream chunk.'));
             }
@@ -381,13 +386,35 @@ export default class ReadStream<T = any> {
                 (size + this._receivedSize > this._allowedSize)
             ) return this.close(StreamErrorCloseCode.SizeLimitExceeded);
 
+            this._receivedSize += size;
+
+            this._chainChunkSize++;
+            this._clearChunkTimeout();
+            this._chain = this._chain.then(() => this._chainNextChunk(chunk, type, size));
+        }
+    }
+
+    private async _chainNextChunk(chunk: Promise<any> | ArrayBuffer, type: DataType, size: number) {
+        if(this._chainCancel) return;
+        await this._processChunk(chunk,type,size);
+        this._chainChunkSize--;
+        this._emptyChunksCheck();
+    }
+
+    private async _processChunk(chunk: Promise<any> | ArrayBuffer, type: DataType, size: number) {
+        try {
+            chunk = await chunk;
+
+            if(this._chainCancel) return;
+
             if(this._chunkMiddleware && !await this._chunkMiddleware(chunk, c => chunk = c as any,type)) {
                 this.close(StreamErrorCloseCode.InvalidChunk);
                 return this._transport.onInvalidMessage(new Error('Invalid stream chunk.'));
             }
 
             if(this._chainCancel) return;
-            this._receivedSize += size;
+
+            this._processedSize += size;
             if(this.readResolve) {
                 const resolve = this.readResolve;
                 this.readResolve = null;
