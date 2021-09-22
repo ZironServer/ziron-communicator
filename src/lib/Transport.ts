@@ -60,11 +60,11 @@ export default class Transport {
     public static readStream: typeof ReadStream = ReadStream;
 
     public ackTimeout?: number;
-    public limitBatchPackageLength: number = Transport.limitBatchPackageLength;
+    public limitBatchStringPacketLength: number = Transport.limitBatchStringPacketLength;
     public maxBufferChunkLength?: number;
 
     public static ackTimeout: number = 10000;
-    public static limitBatchPackageLength: number = 310000;
+    public static limitBatchStringPacketLength: number = 310000;
     public static maxBufferChunkLength: number = 200;
     public static binaryResolveTimeout: number = 10000;
     public static packetBinaryResolverLimit: number = 40;
@@ -605,29 +605,39 @@ export default class Transport {
 
     //Send
     // noinspection JSMethodCanBeStatic
-    private compressPreparedPackages(preparedPackets: PreparedPackage[]): PreparedPackage {
-        const binaryPackets: PreparedPackage = [], stringPackets: string[] = [], len = preparedPackets.length;
-        let tmpStringPacket = '', tmpPackets: PreparedPackage;
+    /**
+     * @description
+     * This compression will keep the order of packages.
+     * @param preparedPackages
+     * @private
+     */
+    private compressPreparedPackages(preparedPackages: PreparedPackage[]): (string|ArrayBuffer)[] {
+        const compressedPackets: (string|ArrayBuffer)[] = [], len = preparedPackages.length;
+        let tmpStringPacket: string = "",tmpPacketsBundle: (string|ArrayBuffer)[] = [],
+            tmpPackets: PreparedPackage, bundleHasBinary: boolean = false;
+        tmpPacketsBundle.length = 1;
 
         for(let i = 0; i < len; i++) {
-            tmpPackets = preparedPackets[i];
-            for(let j = 0; j < tmpPackets.length; j++){
-                if(typeof tmpPackets[j] === 'string') {
-                    if((tmpStringPacket.length + (tmpPackets[j] as string).length) > this.limitBatchPackageLength) {
-                        stringPackets.push(PacketType.Bundle +
-                            ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']');
-                        tmpStringPacket = '';
-                    }
-                    tmpStringPacket += ('[' + tmpPackets[j] + '],');
-                }
-                else binaryPackets.push(tmpPackets[j]);
+            tmpPackets = preparedPackages[i];
+            if((bundleHasBinary && tmpPackets.length === 1) ||
+                (tmpStringPacket.length + tmpPackets[0].length) > this.limitBatchStringPacketLength)
+            {
+                tmpPacketsBundle[0] = PacketType.Bundle +
+                    ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']';
+                compressedPackets.push(...tmpPacketsBundle);
+                tmpPacketsBundle = [];
+                tmpPacketsBundle.length = 1;
+                tmpStringPacket = '';
+                bundleHasBinary = false;
             }
+            tmpStringPacket += ('[' + tmpPackets[0] + '],');
+            tmpPacketsBundle.push(...tmpPackets.slice(1));
+            bundleHasBinary = bundleHasBinary || tmpPackets.length > 1;
         }
-        if(tmpStringPacket.length)
-            stringPackets.push(PacketType.Bundle +
-                ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']');
-
-        return stringPackets.length ? [...stringPackets,...binaryPackets] : binaryPackets;
+        tmpPacketsBundle[0] = PacketType.Bundle +
+            ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']';
+        compressedPackets.push(...tmpPacketsBundle);
+        return compressedPackets;
     }
 
     /**
