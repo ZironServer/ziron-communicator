@@ -15,7 +15,7 @@ import Transport, {
 import ReadStream, {ChunkMiddleware} from "./lib/streams/ReadStream";
 import {StreamErrorCloseCode} from "./lib/streams/StreamErrorCloseCode";
 import {StreamState} from "./lib/streams/StreamState";
-import {DataType, analyseTypeofData, containsStreams, isMixedJSONDataType} from "./lib/DataType";
+import {DataType, analyseTypeofData, containsStreams, containsBinaries, isMixedJSONDataType} from "./lib/DataType";
 import {
     TimeoutError,
     TimeoutType,
@@ -43,6 +43,7 @@ export {
     BadConnectionType,
     analyseTypeofData,
     containsStreams,
+    containsBinaries,
     isMixedJSONDataType,
     DataType,
     TransmitListener,
