@@ -278,7 +278,7 @@ export default class Transport {
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
                 return this._processData(packet['3'],packet['4'])
-                    .then(data => this._processInvoke(this.onInvoke,packet['1'],packet['2'],data,packet['3']))
+                    .then(data => this._processInvoke(packet['1'],packet['2'],data,packet['3']))
                     .catch(this.onInvalidMessage);
             case PacketType.InvokeDataResp:
                 const resp = this._invokeResponsePromises[packet['1']];
@@ -370,11 +370,11 @@ export default class Transport {
         }
     }
 
-    private _processInvoke(caller: InvokeListener, procedure: string, callId: number, data: any, dataType: DataType) {
+    private _processInvoke(procedure: string, callId: number, data: any, dataType: DataType) {
         let called;
         try {
             const badConnectionTimestamp = this.badConnectionTimestamp;
-            caller(procedure, data,(data, processComplexTypes) => {
+            this.onInvoke(procedure, data,(data, processComplexTypes) => {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
                 if(badConnectionTimestamp !== this.badConnectionTimestamp) return;
