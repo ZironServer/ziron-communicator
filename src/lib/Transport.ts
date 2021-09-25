@@ -1101,4 +1101,11 @@ export default class Transport {
         }
         return data;
     }
+
+    /**
+     * @internal
+     */
+    public toJSON() {
+        return '[Transport]';
+    }
 }
