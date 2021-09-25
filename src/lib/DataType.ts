@@ -24,6 +24,10 @@ export function containsStreams(type: DataType) {
     return type > 1 && type !== DataType.JSONWithBinaries;
 }
 
+export function containsBinaries(type: DataType) {
+    return type === DataType.Binary || type > 3;
+}
+
 export function parseJSONDataType(containsBinary?: boolean, containsStreams?: boolean): DataType {
     if(containsBinary)
         return containsStreams ? DataType.JSONWithStreamsAndBinary : DataType.JSONWithBinaries;
