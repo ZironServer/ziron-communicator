@@ -442,8 +442,8 @@ export default class Transport {
             const wrapper = [data];
             this._resolveMixedJSONDeep(wrapper, 0, promises, {
                 parseStreams: Transport.streamsEnabled &&
-                    (type === DataType.JSONWithStreams || type === DataType.JSONWithStreamsAndBinary),
-                parseBinaries: type === DataType.JSONWithBinaries || type === DataType.JSONWithStreamsAndBinary
+                    (type === DataType.JSONWithStreams || type === DataType.JSONWithStreamsAndBinaries),
+                parseBinaries: type === DataType.JSONWithBinaries || type === DataType.JSONWithStreamsAndBinaries
             });
             return new Promise(async resolve => {
                 await Promise.all(promises);

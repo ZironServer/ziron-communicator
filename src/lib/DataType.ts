@@ -13,7 +13,7 @@ export const enum DataType {
     Stream,
     JSONWithStreams,
     JSONWithBinaries,
-    JSONWithStreamsAndBinary
+    JSONWithStreamsAndBinaries
 }
 
 export function isMixedJSONDataType(type: DataType) {
@@ -30,7 +30,7 @@ export function containsBinaries(type: DataType) {
 
 export function parseJSONDataType(containsBinary?: boolean, containsStreams?: boolean): DataType {
     if(containsBinary)
-        return containsStreams ? DataType.JSONWithStreamsAndBinary : DataType.JSONWithBinaries;
+        return containsStreams ? DataType.JSONWithStreamsAndBinaries : DataType.JSONWithBinaries;
     else return containsStreams ? DataType.JSONWithStreams : DataType.JSON;
 }
 

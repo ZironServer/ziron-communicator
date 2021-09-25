@@ -808,11 +808,11 @@ describe('Ziron', () => {
       },
       {
         data: {images: [new WriteStream()],car: {color: 'black', code: new ArrayBuffer(10)}},
-        expectedType: DataType.JSONWithStreamsAndBinary
+        expectedType: DataType.JSONWithStreamsAndBinaries
       },
       {
         data: {images: [new WriteStream(),new ArrayBuffer(10),'']},
-        expectedType: DataType.JSONWithStreamsAndBinary
+        expectedType: DataType.JSONWithStreamsAndBinaries
       }
     ].forEach((test,index) => {
       it(`Analyse typeof data test: ${index}`, () => {
