@@ -153,8 +153,19 @@ export default class ReadStream<T = any> {
      */
     public readonly errorCode?: StreamErrorCloseCode | number;
 
-    constructor(private readonly id: number, private readonly _transport: Transport) {
-        this._createdBadConnectionTimestamp = _transport.badConnectionTimestamp;
+    private readonly _transport: Transport;
+
+    constructor(public readonly id: number, transport: Transport) {
+        Object.defineProperty(this, "_transport", {
+            enumerable: false,
+            writable: true
+        });
+        Object.defineProperty(this, "_createdBadConnectionTimestamp", {
+            enumerable: false,
+            writable: true
+        });
+        this._transport = transport;
+        this._createdBadConnectionTimestamp = transport.badConnectionTimestamp;
     }
 
     /**
