@@ -14,7 +14,8 @@
     "email": "lucacode1@gmail.com"
   },
   "files": [
-    "dist/**/*"
+    "dist/**/*",
+    "!.DS_Store"
   ],
   "devDependencies": {
     "typescript": "^3.7.5",
