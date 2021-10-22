@@ -1,6 +1,6 @@
 {
   "name": "ziron-engine",
-  "description": "The Ziron typescript engine that handles sending of transmits and invokes.",
+  "description": "The Ziron typescript engine.",
   "version": "0.4.5",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -42,7 +42,7 @@
   "keywords": [
     "ziron",
     "protocol",
-    "communicator",
+    "transport",
     "core",
     "fast",
     "lightway"
