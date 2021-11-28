@@ -666,8 +666,10 @@ describe('Ziron', () => {
 
       await Promise.all([writeStreamObj,writeStreamBin].map(async (stream) => {
         await stream.end(new ArrayBuffer(10));
-        await expect(stream.end()).to.be.rejectedWith(Error);
-        await expect(stream.write(new ArrayBuffer(10))).to.be.rejectedWith(Error);
+        await Promise.all([
+            expect(stream.end()).to.be.rejectedWith(Error),
+            expect(stream.write(new ArrayBuffer(10))).to.be.rejectedWith(Error)
+        ]);
       }));
     });
 
