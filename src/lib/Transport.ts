@@ -84,6 +84,7 @@ export default class Transport {
     public onPing: () => void;
     public onPong: () => void;
     public send: (msg: string | ArrayBuffer) => void;
+    public hasLowBackpressure: () => boolean;
 
     public readonly badConnectionTimestamp: number = -1;
 
@@ -95,6 +96,14 @@ export default class Transport {
         onPing?: () => void;
         onPong?: () => void;
         send?: (msg: string | ArrayBuffer) => void;
+        /**
+         * @description
+         * The write streams will pause when the backpressure is
+         * not low and are waiting for low pressure.
+         * When this method is used, backpressure draining
+         * must be emitted with the emitBackpressureDrain method.
+         */
+        hasLowBackpressure?: () => boolean;
     } = {}, open: boolean = true) {
         this.onInvalidMessage = connector.onInvalidMessage || (() => {});
         this.onListenerError = connector.onListenerError || (() => {});
@@ -103,6 +112,7 @@ export default class Transport {
         this.onPing = connector.onPing || (() => {});
         this.onPong = connector.onPong || (() => {});
         this.send = connector.send || (() => {});
+        this.hasLowBackpressure = connector.hasLowBackpressure || (() => true);
         this._open = open;
     }
 
@@ -144,6 +154,25 @@ export default class Transport {
     private _bufferTimeoutTicker: NodeJS.Timeout | undefined;
     private _bufferTimeoutTimestamp: number | undefined;
 
+    private readonly _lowBackpressureWaiters: (() => void)[] = [];
+
+    /**
+     * @internal
+     * @private
+     */
+    _addLowBackpressureWaiter(waiter: () => void) {
+        this._lowBackpressureWaiters.push(waiter);
+    }
+
+    /**
+     * @internal
+     * @private
+     */
+    _cancelLowBackpressureWaiter(waiter: () => void) {
+        const index = this._lowBackpressureWaiters.indexOf(waiter);
+        if(index !== -1) this._lowBackpressureWaiters.splice(index, 1);
+    }
+
     emitMessage(rawMsg: string | ArrayBuffer) {
         try {
             if(typeof rawMsg !== "string"){
@@ -179,6 +208,11 @@ export default class Transport {
             }
         }
         catch(e){this.onInvalidMessage(e);}
+    }
+
+    emitBackpressureDrain() {
+        while(this._lowBackpressureWaiters.length && this.hasLowBackpressure())
+            this._lowBackpressureWaiters.shift()!();
     }
 
     emitBadConnection(type: BadConnectionType,msg?: string) {

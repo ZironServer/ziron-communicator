@@ -82,6 +82,7 @@ export default class WriteStream<B extends boolean = false> {
     private _sentSize: number = 0;
 
     private _resolveSizePermissionWait: ((err?: Error) => void) | null;
+    private _resolveLowBackpressureWait: ((err?: Error) => void) | null;
 
     private _writeLock: boolean = false;
 
@@ -220,6 +221,22 @@ export default class WriteStream<B extends boolean = false> {
         });
     }
 
+    private waitForLowBackpressure(): Promise<void> | void {
+        if(this._transport.hasLowBackpressure()) return;
+        if(this._resolveLowBackpressureWait) throw new Error("Already waiting for low backpressure");
+        else return new Promise((res,rej) => {
+            const resolver = (err?: Error) => {
+                this._resolveLowBackpressureWait = null;
+                if(err) {
+                    this._transport._cancelLowBackpressureWaiter(resolver);
+                    rej(err);
+                }
+                else res();
+            }
+            this._transport._addLowBackpressureWaiter(resolver);
+        });
+    }
+
     private _allowSize(size: number) {
         if(this.state !== StreamState.Open || size <= 0) return;
         this._allowedSize += size;
@@ -232,26 +249,35 @@ export default class WriteStream<B extends boolean = false> {
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this._eofSent) throw new Error("Can not write when end was already called.");
         if(this.state !== StreamState.Open) await this.opened;
-        let availableSize = this.remainingSizeAllowed;
-        if(data.byteLength <= availableSize) this._sendBinaryChunk(new Uint8Array(data));
-        else {
-            try {
-                this._writeLock = true;
-                for(let i = 0; i < data.byteLength;) {
-                    if(availableSize <= 0) {
-                        await this.waitForMoreSizePermission();
-                        availableSize = this.remainingSizeAllowed;
-                    }
-                    const byteLength = Math.min(data.byteLength - i,availableSize);
-                    this._sendBinaryChunk(new Uint8Array(data,i,byteLength))
-                    i+= byteLength;
-                    availableSize = this.remainingSizeAllowed;
-                }
-            }
-            catch (_) {return false;}
-            finally {this._writeLock = false;}
+        const availableSize = this.remainingSizeAllowed;
+        try {
+            this._writeLock = true;
+            if(data.byteLength <= availableSize) await this._sendBinaryChunk(new Uint8Array(data));
+            else await this._internalSendBinaryChunked(data,availableSize);
         }
+        catch (_) {return false;}
+        finally {this._writeLock = false;}
         return true;
+    }
+
+    /**
+     * Used to send binary data chunked to not
+     * break the allowed remaining size.
+     * @param data
+     * @param availableSize
+     * @private
+     */
+    private async _internalSendBinaryChunked(data: ArrayBuffer, availableSize = this.remainingSizeAllowed) {
+        for(let i = 0; i < data.byteLength;) {
+            if(availableSize <= 0) {
+                await this.waitForMoreSizePermission();
+                availableSize = this.remainingSizeAllowed;
+            }
+            const byteLength = Math.min(data.byteLength - i,availableSize);
+            await this._sendBinaryChunk(new Uint8Array(data,i,byteLength))
+            i+= byteLength;
+            availableSize = this.remainingSizeAllowed;
+        }
     }
 
     private async objectWrite(data: any, processComplexTypes?: boolean): Promise<boolean> {
@@ -259,17 +285,16 @@ export default class WriteStream<B extends boolean = false> {
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this._eofSent) throw new Error("Can not write when end was already called.");
         if(this.state !== StreamState.Open) await this.opened;
-
-        if(this.remainingSizeAllowed > 0) this._sendObjectChunk(data,processComplexTypes);
-        else {
-            try {
-                this._writeLock = true;
+        try {
+            this._writeLock = true;
+            if(this.remainingSizeAllowed > 0) await this._sendObjectChunk(data,processComplexTypes);
+            else {
                 await this.waitForMoreSizePermission();
-                this._sendObjectChunk(data,processComplexTypes);
+                await this._sendObjectChunk(data,processComplexTypes);
             }
-            catch (_) {return false;}
-            finally {this._writeLock = false;}
         }
+        catch (_) {return false;}
+        finally {this._writeLock = false;}
         return true;
     }
 
@@ -291,14 +316,19 @@ export default class WriteStream<B extends boolean = false> {
         if(this._eofSent) throw new Error("End was already called.");
         if(this.state !== StreamState.Open) await this.opened;
 
-        if(data == null) this._transport._sendStreamEnd(this._id);
-        else if(data.byteLength <= this.remainingSizeAllowed)
-            this._sendBinaryChunk(new Uint8Array(data),true);
-        else {
-            if(!await this.write(data)) return false;
-            this._transport._sendStreamEnd(this._id);
+        try {
+            this._writeLock = true;
+            if(data == null) await this._sendStreamEnd();
+            else if(data.byteLength <= this.remainingSizeAllowed)
+                await this._sendBinaryChunk(new Uint8Array(data),true);
+            else {
+                await this._internalSendBinaryChunked(data);
+                await this._sendStreamEnd();
+            }
+            this._onEOFSend();
         }
-        this._onEOFSend();
+        catch (_) {return false;}
+        finally {this._writeLock = false;}
         return true;
     }
 
@@ -309,18 +339,18 @@ export default class WriteStream<B extends boolean = false> {
         if(this._eofSent) throw new Error("End was already called.");
         if(this.state !== StreamState.Open) await this.opened;
 
-        if(data === undefined) this._transport._sendStreamEnd(this._id);
-        if(this.remainingSizeAllowed > 0) this._sendObjectChunk(data,processComplexTypes,true);
-        else {
-            try {
-                this._writeLock = true;
+        try {
+            this._writeLock = true;
+            if(data === undefined) await this._sendStreamEnd();
+            if(this.remainingSizeAllowed > 0) await this._sendObjectChunk(data,processComplexTypes,true);
+            else {
                 await this.waitForMoreSizePermission();
-                this._sendObjectChunk(data,processComplexTypes,true);
+                await this._sendObjectChunk(data,processComplexTypes,true);
             }
-            catch (_) {return false;}
-            finally {this._writeLock = false;}
+            this._onEOFSend();
         }
-        this._onEOFSend();
+        catch (_) {return false;}
+        finally {this._writeLock = false;}
         return true;
     }
 
@@ -338,14 +368,21 @@ export default class WriteStream<B extends boolean = false> {
     readonly end: (B extends true ? ((data?: ArrayBuffer) => Promise<boolean>) :
         ((data?: any, processComplexTypes?: boolean) => Promise<boolean>));
 
-    private _sendBinaryChunk(data: Uint8Array,end?: boolean) {
+    private async _sendBinaryChunk(data: Uint8Array,end?: boolean) {
+        await this.waitForLowBackpressure();
         this._sentSize += data.byteLength;
         this._transport._sendBinaryStreamChunk(this._id,data,end);
     }
 
-    private _sendObjectChunk(data: any, processComplexTypes?: boolean, end?: boolean) {
+    private async _sendObjectChunk(data: any, processComplexTypes?: boolean, end?: boolean) {
+        await this.waitForLowBackpressure();
         this._sentSize += 1;
         this._transport._sendStreamChunk(this._id,data,processComplexTypes,end);
+    }
+
+    private async _sendStreamEnd() {
+        await this.waitForLowBackpressure();
+        this._transport._sendStreamEnd(this._id);
     }
 
     private _onEOFSend() {
@@ -399,6 +436,8 @@ export default class WriteStream<B extends boolean = false> {
         if(rmFromTransport) this._transport._removeWriteStream(this._id);
         if(this._resolveSizePermissionWait)
             this._resolveSizePermissionWait(new Error("Stream is closed."));
+        if(this._resolveLowBackpressureWait)
+            this._resolveLowBackpressureWait(new Error("Stream is closed."));
         this._closePromiseResolve(errorCode);
     }
 
