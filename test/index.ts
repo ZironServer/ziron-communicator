@@ -69,6 +69,7 @@ describe('Ziron', () => {
   afterEach(() => {
     [comA1,comA2,comB1,comB2].forEach((com) => {
       com.emitOpen();
+      com.hasLowBackpressure = () => true;
       com.onTransmit = () => {};
       com.onInvoke = () => {};
     });
@@ -671,6 +672,46 @@ describe('Ziron', () => {
             expect(stream.write(new ArrayBuffer(10))).to.be.rejectedWith(Error)
         ]);
       }));
+    });
+
+    it("WriteStream should wait for low backpressure before sending next chunk.", async () => {
+      const streams = [new WriteStream(false),new WriteStream(true)];
+
+      let dataCounter = 0;
+
+      comB1.onTransmit = (event,data: ReadStream[]) => {
+        expect(event).to.be.equal('writeStreams');
+        data.forEach(stream => {
+          stream.accept();
+          (async () => {
+            while(await stream.read() !== null) dataCounter++;
+          })();
+        });
+      };
+      comA1.transmit('writeStreams',streams, {processComplexTypes: true});
+
+      let backpressure = true;
+      comA1.hasLowBackpressure = () => !backpressure;
+
+      for(const stream of streams) {
+        stream.write(new ArrayBuffer(10));
+        await new Promise(r => setTimeout(r,50));
+
+        //Should not receive the chunk.. after waiting.
+        expect(dataCounter).to.be.equal(0);
+
+        //drain
+        backpressure = false;
+        comA1.emitBackpressureDrain();
+        await new Promise(r => setTimeout(r,20));
+
+        //Should receive the chunk.. after drain.
+        expect(dataCounter).to.be.equal(1);
+
+        //reset
+        dataCounter = 0;
+        backpressure = true;
+      }
     });
 
     it('Transmit a stream and a connection lost on B after sending should close the ReadStream after accepting.', (done) => {
