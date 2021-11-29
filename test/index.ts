@@ -2,22 +2,23 @@ import {
   analyseTypeofData,
   BadConnectionError,
   BadConnectionType,
-  DataType,
+  DataType, InsufficientBufferSizeError,
   JSONString,
-  ReadStream,
-  StreamErrorCloseCode, StreamCloseError,
-  StreamState,
-  WriteStream,
   PreparedPackage,
+  ReadStream,
+  StreamCloseError,
+  StreamErrorCloseCode,
+  StreamState,
   TimeoutError,
-  Transport
+  Transport,
+  WriteStream
 } from './../src/index';
-import {expect} from 'chai';
 import * as chai from 'chai';
+import {expect} from 'chai';
 import * as chaiAsPromised from 'chai-as-promised';
-chai.use(chaiAsPromised);
-
 import LinkedBuffer from "../src/lib/streams/LinkedBuffer";
+
+chai.use(chaiAsPromised);
 
 const comA1 = new Transport({
   onInvalidMessage: (err) => console.error('A1: Invalid meessage: ', err),
@@ -73,6 +74,7 @@ describe('Ziron', () => {
       com.onTransmit = () => {};
       com.onInvoke = () => {};
       com.buffer.maxBufferChunkLength = 200;
+      com.buffer.maxBufferSize = Number.POSITIVE_INFINITY;
     });
   })
 
@@ -1073,6 +1075,14 @@ describe('Ziron', () => {
       expect(function () {
         comA1.transmit('event',stream,{processComplexTypes: true})
       }).to.throw(Error,'Write-stream already used.');
+    });
+
+    it(`Should throw InsufficientBufferSizeError when transmitting a package that does not fit in the buffer (With an unconnected source).`, () => {
+      comA1.emitBadConnection(BadConnectionType.Disconnect);
+      comA1.buffer.maxBufferSize = 200;
+      expect(function () {
+        comA1.transmit("test",{pic: new ArrayBuffer(400)},{processComplexTypes: true});
+      }).to.throw(InsufficientBufferSizeError);
     });
 
   });
