@@ -43,13 +43,11 @@ export default class Transport {
      */
     public static readStream: typeof ReadStream = ReadStream;
 
+    public readonly buffer: PackageBuffer;
+
     public ackTimeout?: number;
-    public limitBatchStringPacketLength: number = Transport.limitBatchStringPacketLength;
-    public maxBufferChunkLength?: number;
 
     public static ackTimeout: number = 10000;
-    public static limitBatchStringPacketLength: number = 310000;
-    public static maxBufferChunkLength: number = 200;
     public static binaryResolveTimeout: number = 10000;
     public static packetBinaryResolverLimit: number = 40;
     public static packetStreamLimit: number = 20;
@@ -60,14 +58,21 @@ export default class Transport {
     /**
      * @description
      * Is called whenever one of the listeners
-     * (onTransmit, onInvoke, onPing) have thrown an error.
+     * (onTransmit, onInvoke, onPing, onPong) have thrown an error.
      */
     public onListenerError: (err: Error) => void;
     public onTransmit: TransmitListener;
     public onInvoke: InvokeListener;
     public onPing: () => void;
     public onPong: () => void;
-    public send: (msg: string | ArrayBuffer) => void;
+    private _send: (msg: string | ArrayBuffer) => void;
+    public set send(value: (msg: string | ArrayBuffer) => void) {
+        this._send = value;
+        this.buffer.send = value;
+    }
+    public get send(): (msg: string | ArrayBuffer) => void {
+        return this._send;
+    }
     public hasLowBackpressure: () => boolean;
 
     public readonly badConnectionTimestamp: number = -1;
@@ -95,9 +100,10 @@ export default class Transport {
         this.onInvoke = connector.onInvoke || (() => {});
         this.onPing = connector.onPing || (() => {});
         this.onPong = connector.onPong || (() => {});
-        this.send = connector.send || (() => {});
+        this._send = connector.send || (() => {});
         this.hasLowBackpressure = connector.hasLowBackpressure || (() => true);
         this._open = open;
+        this.buffer = new PackageBuffer(this._send,() => this._open);
     }
 
     /**
@@ -132,11 +138,6 @@ export default class Transport {
         }> = {};
 
     private _open: boolean = true;
-
-    private _buffer: PreparedPackage[] = [];
-    private _bufferTimeoutDelay: number | undefined;
-    private _bufferTimeoutTicker: NodeJS.Timeout | undefined;
-    private _bufferTimeoutTimestamp: number | undefined;
 
     private readonly _lowBackpressureWaiters: (() => void)[] = [];
 
@@ -201,7 +202,7 @@ export default class Transport {
 
     emitBadConnection(type: BadConnectionType,msg?: string) {
         this._open = false;
-        this._clearBufferTimeout();
+        this.buffer.clearBatchTime();
         const err = new BadConnectionError(type,msg);
         (this as Writable<Transport>).badConnectionTimestamp = Date.now();
         this._clearBinaryResolver();
@@ -213,7 +214,7 @@ export default class Transport {
 
     emitOpen() {
         this._open = true;
-        this._flushBuffer();
+        this.buffer.flushBuffer();
     }
 
     private _onListenerError(err: Error) {
@@ -401,7 +402,7 @@ export default class Transport {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
                 if(badConnectionTimestamp !== this.badConnectionTimestamp) return;
-                this.send(PacketType.InvokeErrResp + ',' +
+                this._send(PacketType.InvokeErrResp + ',' +
                     callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err)))
                 );
             },dataType);
@@ -418,21 +419,21 @@ export default class Transport {
      */
     private _sendInvokeDataResp(callId: number, data: any, processComplexTypes?: boolean) {
         if(!processComplexTypes) {
-            this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
+            this._send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
         else if(data instanceof WriteStream && Transport.streamsEnabled){
             const streamId = this._getNewStreamId(data.binary);
-            this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
+            this._send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.Stream + ',' + streamId);
             data._init(this,streamId);
             data._onTransmitted();
         }
         else if(data instanceof ArrayBuffer) {
             const binaryId = this._getNewBinaryPlaceholderId();
-            this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
+            this._send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.Binary + ',' + binaryId);
-            this.send(Transport._createBinaryReferencePacket(binaryId,data));
+            this._send(Transport._createBinaryReferencePacket(binaryId,data));
         }
         else {
             const preparedPackage: PreparedPackage = [] as any;
@@ -446,7 +447,7 @@ export default class Transport {
             preparedPackage[0] = PacketType.InvokeDataResp + ',' + callId + ',' +
                 parseJSONDataType(preparedPackage.length > 1, streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
-            for(let i = 0; i < preparedPackage.length; i++) this.send(preparedPackage[i])
+            for(let i = 0; i < preparedPackage.length; i++) this._send(preparedPackage[i])
         }
     }
 
@@ -622,42 +623,6 @@ export default class Transport {
     }
 
     //Send
-    // noinspection JSMethodCanBeStatic
-    /**
-     * @description
-     * This compression will keep the order of packages.
-     * @param preparedPackages
-     * @private
-     */
-    private compressPreparedPackages(preparedPackages: PreparedPackage[]): (string|ArrayBuffer)[] {
-        const compressedPackets: (string|ArrayBuffer)[] = [], len = preparedPackages.length;
-        let tmpStringPacket: string = "",tmpPacketsBundle: (string|ArrayBuffer)[] = [],
-            tmpPackets: PreparedPackage, bundleHasBinary: boolean = false;
-        tmpPacketsBundle.length = 1;
-
-        for(let i = 0; i < len; i++) {
-            tmpPackets = preparedPackages[i];
-            if((bundleHasBinary && tmpPackets.length === 1) ||
-                (tmpStringPacket.length + tmpPackets[0].length) > this.limitBatchStringPacketLength)
-            {
-                tmpPacketsBundle[0] = PacketType.Bundle +
-                    ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']';
-                compressedPackets.push(...tmpPacketsBundle);
-                tmpPacketsBundle = [];
-                tmpPacketsBundle.length = 1;
-                tmpStringPacket = '';
-                bundleHasBinary = false;
-            }
-            tmpStringPacket += ('[' + tmpPackets[0] + '],');
-            tmpPacketsBundle.push(...tmpPackets.slice(1));
-            bundleHasBinary = bundleHasBinary || tmpPackets.length > 1;
-        }
-        tmpPacketsBundle[0] = PacketType.Bundle +
-            ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']';
-        compressedPackets.push(...tmpPacketsBundle);
-        return compressedPackets;
-    }
-
     /**
      * Notice that the prepared package can not send multiple times.
      * If you need this you can check out the static method prepareMultiTransmit.
@@ -804,8 +769,8 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     sendPreparedPackage(preparedPackage: PreparedPackage, batch?: number | true | null): void {
-        if(!this._open) this._buffer.push(preparedPackage);
-        else if(batch) this._addBatchPackage(preparedPackage,batch);
+        if(!this._open) this.buffer.add(preparedPackage);
+        else if(batch) this.buffer.add(preparedPackage,batch);
         else this._directSendPreparedPackage(preparedPackage);
     }
 
@@ -818,7 +783,7 @@ export default class Transport {
                     if(tmpAfterSend) tmpAfterSend();
                     resolve();
                 }
-                this._addBatchPackage(preparedPackage,batch);
+                this.buffer.add(preparedPackage,batch);
             })
         }
         else if(this._open) return this._directSendPreparedPackage(preparedPackage), RESOLVED_PROMISE;
@@ -828,7 +793,7 @@ export default class Transport {
                 if(tmpAfterSend) tmpAfterSend();
                 resolve();
             }
-            this._buffer.push(preparedPackage);
+            this.buffer.add(preparedPackage);
         })
     }
 
@@ -849,105 +814,20 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     sendPing() {
-        try {this.send(PING_BINARY);}
+        try {this._send(PING_BINARY);}
         catch (_) {}
     }
 
     // noinspection JSUnusedGlobalSymbols
     sendPong() {
-        try {this.send(PONG_BINARY);}
+        try {this._send(PONG_BINARY);}
         catch (_) {}
     }
 
     private _directSendPreparedPackage(preparedPackage: PreparedPackage) {
-        if(preparedPackage.length === 1) this.send(preparedPackage[0])
-        else for(let i = 0, len = preparedPackage.length; i < len; i++) this.send(preparedPackage[i]);
+        if(preparedPackage.length === 1) this._send(preparedPackage[0])
+        else for(let i = 0, len = preparedPackage.length; i < len; i++) this._send(preparedPackage[i]);
         if(preparedPackage._afterSend) preparedPackage._afterSend();
-    }
-
-    /**
-     * @description
-     * Removes a package from the batch list if it is not already sent.
-     * The returned boolean indicates if it was successfully cancelled.
-     * @param preparedPackage
-     */
-    public tryCancelPackage(preparedPackage: PreparedPackage): boolean {
-        const index = this._buffer.indexOf(preparedPackage);
-        if(index !== -1) {
-            this._buffer.splice(index,1);
-            if(this._buffer.length === 0 && this._bufferTimeoutTicker) {
-                clearTimeout(this._bufferTimeoutTicker);
-                this._bufferTimeoutTicker = undefined;
-            }
-            return true;
-        }
-        return false;
-    }
-
-    private _addBatchPackage(preparedPackage: PreparedPackage, batch: number | true) {
-        this._buffer.push(preparedPackage);
-        if(typeof batch !== 'number') return;
-        if(this._bufferTimeoutTicker) {
-            if(((this._bufferTimeoutDelay! - Date.now()) + this._bufferTimeoutTimestamp!) > batch){
-                clearTimeout(this._bufferTimeoutTicker);
-                this._setBufferTimeout(batch);
-            }
-        }
-        else this._setBufferTimeout(batch);
-    }
-
-    // noinspection JSUnusedGlobalSymbols
-    public flushBuffer(): boolean {
-        this._clearBufferTimeout();
-        return this._flushBuffer();
-    }
-
-    // noinspection JSUnusedGlobalSymbols
-    public getBufferSize(): number {
-        return this._buffer.length;
-    }
-
-    // noinspection JSUnusedGlobalSymbols
-    public clearBuffer() {
-        this._buffer = [];
-    }
-
-    private _onBatchTimeout = () => {
-        this._bufferTimeoutTicker = undefined;
-        this._flushBuffer();
-    }
-
-    private _flushBuffer(): boolean {
-        if(!this._open) return false;
-        const packages = this._buffer;
-        this._buffer = [];
-        if(packages.length <= (this.maxBufferChunkLength || Transport.maxBufferChunkLength))
-            this._sendBufferChunk(packages);
-        else {
-            const chunkLength = (this.maxBufferChunkLength || Transport.maxBufferChunkLength);
-            for (let i = 0,len = packages.length; i < len; i += chunkLength)
-                this._sendBufferChunk(packages.slice(i, i + chunkLength))
-        }
-        return true;
-    }
-
-    private _sendBufferChunk(packages: PreparedPackage[]) {
-        const compressPackage = this.compressPreparedPackages(packages), listLength = packages.length;
-        for(let i = 0; i < compressPackage.length; i++) this.send(compressPackage[i]);
-        for(let i = 0; i < listLength; i++) if(packages[i]._afterSend) packages[i]._afterSend!();
-    }
-
-    private _clearBufferTimeout() {
-        if(this._bufferTimeoutTicker) {
-            clearTimeout(this._bufferTimeoutTicker);
-            this._bufferTimeoutTicker = undefined;
-        }
-    }
-
-    private _setBufferTimeout(ms: number) {
-        this._bufferTimeoutTicker = setTimeout(this._onBatchTimeout,ms);
-        this._bufferTimeoutTimestamp = Date.now();
-        this._bufferTimeoutDelay = ms;
     }
 
     /**
@@ -962,17 +842,17 @@ export default class Transport {
      */
     _sendStreamChunk(streamId: number, data: any, processComplexTypes?: boolean, end?: boolean) {
         if(!processComplexTypes) {
-            this.send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
+            this._send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
         else if(Transport.chunksCanContainStreams && data instanceof WriteStream){
             const streamId = this._getNewStreamId(data.binary);
-            this.send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
+            this._send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.Stream + ',' + streamId);
             data._init(this,streamId);
             data._onTransmitted();
         }
-        else if(data instanceof ArrayBuffer) this.send(
+        else if(data instanceof ArrayBuffer) this._send(
             Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),end));
         else {
             const packets: (string | ArrayBuffer)[] = [];
@@ -983,7 +863,7 @@ export default class Transport {
             packets[0] = (end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + parseJSONDataType(packets.length > 1 || streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '');
-            for(let i = 0; i < packets.length; i++) this.send(packets[i])
+            for(let i = 0; i < packets.length; i++) this._send(packets[i])
             for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();
         }
     }
@@ -995,7 +875,7 @@ export default class Transport {
      * packet directly (faster than using _sendStreamChunk).
      */
     _sendBinaryStreamChunk(streamId: number, binaryPart: Uint8Array, end?: boolean) {
-        this.send(Transport._createBinaryStreamChunkPacket(streamId,binaryPart,end))
+        this._send(Transport._createBinaryStreamChunkPacket(streamId,binaryPart,end))
     }
 
     /**
@@ -1005,7 +885,7 @@ export default class Transport {
      * @param streamId
      */
     _sendStreamEnd(streamId: number) {
-        this.send(PacketType.StreamEnd + ',' + streamId);
+        this._send(PacketType.StreamEnd + ',' + streamId);
     }
 
     private static _createBinaryStreamChunkPacket(streamId: number, binary: Uint8Array, end?: boolean): ArrayBuffer {
@@ -1024,7 +904,7 @@ export default class Transport {
      * @private
      */
     _sendStreamAccept(streamId: number,allowedSize: number) {
-        this.send(PacketType.StreamAccept + ',' + streamId + ',' + allowedSize);
+        this._send(PacketType.StreamAccept + ',' + streamId + ',' + allowedSize);
     }
 
     /**
@@ -1035,7 +915,7 @@ export default class Transport {
      * @private
      */
     _sendStreamAllowMore(streamId: number,allowedSize: number) {
-        this.send(PacketType.StreamDataPermission + ',' + streamId + ',' + allowedSize);
+        this._send(PacketType.StreamDataPermission + ',' + streamId + ',' + allowedSize);
     }
 
     /**
@@ -1046,7 +926,7 @@ export default class Transport {
      * @private
      */
     _sendReadStreamClose(streamId: number, errorCode?: number) {
-        this.send(PacketType.ReadStreamClose + ',' + streamId +
+        this._send(PacketType.ReadStreamClose + ',' + streamId +
             (errorCode != null ? (',' + errorCode) : ''));
     }
 
@@ -1058,7 +938,7 @@ export default class Transport {
      * @private
      */
     _sendWriteStreamClose(streamId: number, errorCode: number) {
-        this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + errorCode);
+        this._send(PacketType.WriteStreamClose + ',' + streamId + ',' + errorCode);
     }
 
     /**
@@ -1118,6 +998,16 @@ export default class Transport {
             }
         }
         return data;
+    }
+
+    /**
+     * @description
+     * Tries to cancel a package sent if it is not already sent.
+     * The returned boolean indicates if it was successfully cancelled.
+     * @param preparedPackage
+     */
+    public tryCancelPackage(preparedPackage: PreparedPackage): boolean {
+        return this.buffer.tryRemove(preparedPackage);
     }
 
     /**
