@@ -72,6 +72,7 @@ describe('Ziron', () => {
       com.hasLowBackpressure = () => true;
       com.onTransmit = () => {};
       com.onInvoke = () => {};
+      com.buffer.maxBufferChunkLength = 200;
     });
   })
 
@@ -882,7 +883,6 @@ describe('Ziron', () => {
       for(let i = 0; i < count; i++){
         comA1.transmit('batch','msg',{batch: 50});
       }
-      comA1.maxBufferChunkLength = undefined;
     });
 
     it('Batch package order should not be messed up.', (done) => {
@@ -909,7 +909,6 @@ describe('Ziron', () => {
         sendMessages.push(data);
         comA1.transmit('batch',data,{batch: 100,processComplexTypes: i % 2 === 0});
       }
-      comA1.maxBufferChunkLength = undefined;
     });
 
     it('Should not send cancelled batch packages.', (done) => {
