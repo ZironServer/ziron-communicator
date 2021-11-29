@@ -13,6 +13,8 @@ import WriteStream from "./streams/WriteStream";
 import {StreamErrorCloseCode} from "./streams/StreamErrorCloseCode";
 import {RESOLVED_PROMISE, Writable} from "./Utils";
 import {BadConnectionError, BadConnectionType, InvalidActionError, TimeoutError, TimeoutType} from "./Errors";
+import {PreparedInvokePackage, PreparedPackage} from "./PreparedPackage";
+import PackageBuffer from "./PackageBuffer";
 
 export interface ComplexTypesOption {
     /**
@@ -26,24 +28,6 @@ export interface ComplexTypesOption {
 export type TransmitListener = (receiver: string, data: any, type: DataType) => void | Promise<void>;
 export type InvokeListener = (procedure: string, data: any, end: (data?: any, processComplexTypes?: boolean) => void,
     reject: (err?: any) => void, type: DataType) => void | Promise<void>
-
-/**
- * A prepared package contains prepared or multiple packets.
- * The first packet is always the string header packet,
- * followed by optional binary packets.
- */
-export type PreparedPackage = [string,...ArrayBuffer[]] & {
-    /**
-     * @description
-     * Used to set the ack timeout.
-     * @internal
-     */
-    _afterSend?: () => void;
-};
-
-type PreparedInvokePackage<T = any> = PreparedPackage & {
-    promise: Promise<T>
-}
 
 const PING = 57;
 const PING_BINARY = new Uint8Array([PING]);
