@@ -9,7 +9,6 @@ import WriteStream from "./lib/streams/WriteStream";
 import Transport, {
     TransmitListener,
     InvokeListener,
-    PreparedPackage,
     ComplexTypesOption
 } from "./lib/Transport";
 import ReadStream, {ChunkMiddleware} from "./lib/streams/ReadStream";
@@ -22,13 +21,18 @@ import {
     InvalidActionError,
     BadConnectionError,
     BadConnectionType,
-    BackError
+    BackError,
+    InsufficientBufferSizeError
 } from "./lib/Errors";
 import {dehydrateError, hydrateError} from "./lib/ErrorUtils";
 import StreamCloseError from "./lib/streams/StreamCloseError";
+import { PreparedPackage } from "./lib/PreparedPackage";
+import PackageBuffer from "./lib/PackageBuffer";
 
 export {
     Transport,
+    PackageBuffer,
+    InsufficientBufferSizeError,
     JSONString,
     WriteStream,
     ReadStream,
