@@ -44,3 +44,10 @@ export class BackError extends Error {
         this.code = code;
     }
 }
+
+export class InsufficientBufferSizeError extends Error {
+    constructor(public readonly bufferType: string) {
+        super("Insufficient buffer size");
+        this.name = "InsufficientBufferSizeError";
+    }
+}
