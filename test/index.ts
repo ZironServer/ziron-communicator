@@ -69,7 +69,7 @@ describe('Ziron', () => {
 
   afterEach(() => {
     [comA1,comA2,comB1,comB2].forEach((com) => {
-      com.emitOpen();
+      com.emitReconnection();
       com.hasLowBackpressure = () => true;
       com.onTransmit = () => {};
       com.onInvoke = () => {};
@@ -329,7 +329,7 @@ describe('Ziron', () => {
       comA1.invoke('?').catch(err => {
         expect(err).to.be.instanceof(BadConnectionError)
         done();
-        comA1.emitOpen();
+        comA1.emitReconnection();
       });
       comA1.emitBadConnection(BadConnectionType.Disconnect);
     });
@@ -730,7 +730,7 @@ describe('Ziron', () => {
         data.closed.then((code) => {
           expect(code).to.be.equal(StreamErrorCloseCode.BadConnection);
           done();
-          comB1.emitOpen();
+          comB1.emitReconnection();
         });
         data.accept();
       };

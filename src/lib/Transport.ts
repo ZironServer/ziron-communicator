@@ -93,7 +93,7 @@ export default class Transport {
          * must be emitted with the emitBackpressureDrain method.
          */
         hasLowBackpressure?: () => boolean;
-    } = {}, open: boolean = true) {
+    } = {}, connected: boolean = true) {
         this.onInvalidMessage = connector.onInvalidMessage || (() => {});
         this.onListenerError = connector.onListenerError || (() => {});
         this.onTransmit = connector.onTransmit || (() => {});
@@ -102,7 +102,7 @@ export default class Transport {
         this.onPong = connector.onPong || (() => {});
         this._send = connector.send || (() => {});
         this.hasLowBackpressure = connector.hasLowBackpressure || (() => true);
-        this._open = open;
+        this._open = connected;
         this.buffer = new PackageBuffer(this._send,() => this._open);
     }
 
@@ -210,7 +210,7 @@ export default class Transport {
         this._activeWriteStreams = {};
     }
 
-    emitOpen() {
+    emitReconnection() {
         this._open = true;
         this.buffer.flushBuffer();
     }

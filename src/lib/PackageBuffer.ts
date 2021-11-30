@@ -11,14 +11,14 @@ import {InsufficientBufferSizeError} from "./Errors";
 
 /**
  * Class for buffering packages and send them batched together.
- * Notice that the buffer should be flushed on a connection when
- * the underlying source can have an unconnected state.
+ * When the underlying source has a temporarily closed state,
+ * the buffer should be flushed on a reopening.
  */
 export default class PackageBuffer {
 
     constructor(
         public send: (msg: string | ArrayBuffer) => void,
-        public isConnected: () => boolean = () => true
+        public isOpen: () => boolean = () => true
     ) {}
 
     private _buffer: PreparedPackage[] = [];
@@ -70,7 +70,7 @@ export default class PackageBuffer {
 
     private _onBatchTimeout = () => {
         this._bufferTimeoutTicker = undefined;
-        if(this.isConnected()) this._internalFlushBuffer();
+        if(this.isOpen()) this._internalFlushBuffer();
     }
 
     /**
@@ -93,8 +93,8 @@ export default class PackageBuffer {
      * the buffer gets flushed.
      * When the parameter is not provided or has a true value,
      * flushing depends on other packages or manually flushing the buffer.
-     * Notice when the underlying source is not connected,
-     * the buffer will not be flushed and should be flushed on reconnection.
+     * Notice when the underlying source is not open,
+     * the buffer will not be flushed and should be flushed on reopening.
      * When the new package would exceed the buffer size,
      * the buffer will be flushed automatically.
      * When it is not possible to flush the buffer in such a state,
@@ -106,7 +106,7 @@ export default class PackageBuffer {
         PackageBuffer._addPreparedPackageSize(preparedPackage);
         if(this._bufferSize + preparedPackage._size! > this.maxBufferSize) {
             //would max out buffer..
-            if(this.isConnected()) {
+            if(this.isOpen()) {
                 //Flush with new package directly.
                 this._pushToBuffer(preparedPackage);
                 this._internalFlushBuffer();
@@ -167,7 +167,7 @@ export default class PackageBuffer {
 
     /**
      * Clears the current buffer batch time ticker.
-     * It can be used on disconnection of the underlying source.
+     * It can be used when the underlying source gets closed.
      */
     public clearBatchTime() {
         this._clearBufferTimeout();
@@ -175,11 +175,11 @@ export default class PackageBuffer {
 
     /**
      * @description
-     * Flushes the buffer when the underlying source is connected;
+     * Flushes the buffer when the underlying source is open;
      * otherwise, it returns false.
      */
     public flushBuffer(): boolean {
-        if(!this.isConnected()) return false;
+        if(!this.isOpen()) return false;
         this._flushBuffer();
         return true;
     }

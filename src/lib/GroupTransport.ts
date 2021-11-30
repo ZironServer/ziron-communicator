@@ -10,17 +10,25 @@ import Transport, {ComplexTypesOption} from "./Transport";
 
 /**
  * @description
- * This util class helps to build a transport for multiple end connections.
+ * This util class helps to build a transport for multiple end sources.
  * Instead of using the transport prepareMultiTransmit method and sending the
  * package with each transporter, the batching is not individual for
  * each transport and shared for the group.
- * Notice that the internal buffer should be flushed on a complete connection of the
- * underlying source when it can have an unconnected state.
+ * When the underlying source has a temporarily disconnected state,
+ * the buffer should be flushed on a reconnection.
  */
 export default class GroupTransport {
 
     public readonly buffer: PackageBuffer;
 
+    /**
+     * @param send
+     * The send function should send the message to every socket of the group once.
+     * @param isConnected
+     * Should return a boolean that indicates if the underlying source is completely connected.
+     * When the underlying source does not have a disconnected state,
+     * the function can always return true.
+     */
     constructor(
         private readonly send: (msg: string | ArrayBuffer) => void,
         public isConnected: () => boolean = () => true
@@ -36,6 +44,14 @@ export default class GroupTransport {
         if(preparedPackage._afterSend) preparedPackage._afterSend();
     }
 
+    /**
+     * Sends a transmit.
+     * Notice that internally the prepareMultiTransmit method is used.
+     * This method does not support streams, but binaries are supported.
+     * @param receiver
+     * @param data
+     * @param options
+     */
     transmit(receiver: string, data?: any, options: {batch?: number | true | null} & ComplexTypesOption = {}) {
         const preparedPackage = Transport.prepareMultiTransmit(receiver,data,options);
         if(!this.isConnected()) this.buffer.add(preparedPackage);
