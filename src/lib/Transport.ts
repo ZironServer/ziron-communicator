@@ -113,8 +113,6 @@ export default class Transport {
     private _binaryPlaceHolderId: number = 0;
     private _binaryResolver: Record<number,{resolve: (binary: ArrayBuffer) => void,reject: (err: any) => void,timeout: NodeJS.Timeout}> = {};
 
-    private static _binaryMultiPlaceHolderId: number = -1;
-
     /**
      * Can not be reset on connection lost
      * because prepared packets with old ids can exist.
@@ -236,11 +234,6 @@ export default class Transport {
     private _getNewBinaryPlaceholderId() {
         if(this._binaryPlaceHolderId > Number.MAX_SAFE_INTEGER) this._binaryPlaceHolderId = 0;
         return this._binaryPlaceHolderId++;
-    }
-
-    private static _getNewBinaryMultiPlaceholderId() {
-        if(Transport._binaryMultiPlaceHolderId < Number.MIN_SAFE_INTEGER) Transport._binaryMultiPlaceHolderId = -1;
-        return Transport._binaryMultiPlaceHolderId--;
     }
 
     private _getNewCid(): number {
@@ -825,7 +818,7 @@ export default class Transport {
     }
 
     private _directSendPreparedPackage(preparedPackage: PreparedPackage) {
-        if(preparedPackage.length === 1) this._send(preparedPackage[0])
+        if(preparedPackage.length === 1) this._send(preparedPackage[0]);
         else for(let i = 0, len = preparedPackage.length; i < len; i++) this._send(preparedPackage[i]);
         if(preparedPackage._afterSend) preparedPackage._afterSend();
     }
@@ -943,6 +936,32 @@ export default class Transport {
 
     /**
      * @description
+     * Tries to cancel a package sent if it is not already sent.
+     * The returned boolean indicates if it was successfully cancelled.
+     * @param preparedPackage
+     */
+    public tryCancelPackage(preparedPackage: PreparedPackage): boolean {
+        return this.buffer.tryRemove(preparedPackage);
+    }
+
+    /**
+     * @internal
+     */
+    public toJSON() {
+        return '[Transport]';
+    }
+
+    //Multi transport
+
+    private static _binaryMultiPlaceHolderId: number = -1;
+
+    private static _getNewBinaryMultiPlaceholderId() {
+        if(Transport._binaryMultiPlaceHolderId < Number.MIN_SAFE_INTEGER) Transport._binaryMultiPlaceHolderId = -1;
+        return Transport._binaryMultiPlaceHolderId--;
+    }
+
+    /**
+     * @description
      * Creates a prepared transmit package that can be sent to multiple transporters
      * but not multiple times to the same transport (except there is no binary data in the package).
      * This is extremely efficient when sending to a lot of transporters.
@@ -955,7 +974,7 @@ export default class Transport {
     public static prepareMultiTransmit(receiver: string, data?: any, {processComplexTypes}: ComplexTypesOption = {}): PreparedPackage {
         if(!processComplexTypes) {
             return [PacketType.Transmit + ',"' + receiver + '",' +
-            DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
+                DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
         else if(data instanceof ArrayBuffer) {
             const binaryId = Transport._getNewBinaryMultiPlaceholderId();
@@ -1000,20 +1019,4 @@ export default class Transport {
         return data;
     }
 
-    /**
-     * @description
-     * Tries to cancel a package sent if it is not already sent.
-     * The returned boolean indicates if it was successfully cancelled.
-     * @param preparedPackage
-     */
-    public tryCancelPackage(preparedPackage: PreparedPackage): boolean {
-        return this.buffer.tryRemove(preparedPackage);
-    }
-
-    /**
-     * @internal
-     */
-    public toJSON() {
-        return '[Transport]';
-    }
 }
