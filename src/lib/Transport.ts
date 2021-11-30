@@ -102,8 +102,8 @@ export default class Transport {
         this.onPong = connector.onPong || (() => {});
         this._send = connector.send || (() => {});
         this.hasLowBackpressure = connector.hasLowBackpressure || (() => true);
-        this._open = connected;
-        this.buffer = new PackageBuffer(this._send,() => this._open);
+        this.open = connected;
+        this.buffer = new PackageBuffer(this._send,() => this.open);
     }
 
     /**
@@ -135,7 +135,7 @@ export default class Transport {
             returnDataType?: boolean
         }> = {};
 
-    private _open: boolean = true;
+    public readonly open: boolean = true;
 
     private readonly _lowBackpressureWaiters: (() => void)[] = [];
 
@@ -199,7 +199,7 @@ export default class Transport {
     }
 
     emitBadConnection(type: BadConnectionType,msg?: string) {
-        this._open = false;
+        (this as Writable<Transport>).open = false;
         this.buffer.clearBatchTime();
         const err = new BadConnectionError(type,msg);
         (this as Writable<Transport>).badConnectionTimestamp = Date.now();
@@ -211,7 +211,7 @@ export default class Transport {
     }
 
     emitReconnection() {
-        this._open = true;
+        (this as Writable<Transport>).open = true;
         this.buffer.flushBuffer();
     }
 
@@ -762,7 +762,7 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     sendPreparedPackage(preparedPackage: PreparedPackage, batch?: number | true | null): void {
-        if(!this._open) this.buffer.add(preparedPackage);
+        if(!this.open) this.buffer.add(preparedPackage);
         else if(batch) this.buffer.add(preparedPackage,batch);
         else this._directSendPreparedPackage(preparedPackage);
     }
@@ -779,7 +779,7 @@ export default class Transport {
                 this.buffer.add(preparedPackage,batch);
             })
         }
-        else if(this._open) return this._directSendPreparedPackage(preparedPackage), RESOLVED_PROMISE;
+        else if(this.open) return this._directSendPreparedPackage(preparedPackage), RESOLVED_PROMISE;
         else return new Promise((resolve) => {
             const tmpAfterSend = preparedPackage._afterSend;
             preparedPackage._afterSend = () => {
