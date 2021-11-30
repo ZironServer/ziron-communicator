@@ -2,7 +2,7 @@ import {
   analyseTypeofData,
   BadConnectionError,
   BadConnectionType,
-  DataType, InsufficientBufferSizeError,
+  DataType, GroupTransport, InsufficientBufferSizeError,
   JSONString,
   PreparedPackage,
   ReadStream,
@@ -36,6 +36,11 @@ const comB2 = new Transport({
   onInvalidMessage: (err) => console.error('B2: Invalid meessage: ', err),
   onListenerError: (err) => console.error('B2: Listener err: ', err),
 },true);
+
+const comBGroup = new GroupTransport((msg) => {
+  comB1.emitMessage(msg);
+  comB2.emitMessage(msg);
+}, () => comB1.open && comB2.open);
 
 //connect
 comA1.send = comB1.emitMessage.bind(comB1);
@@ -1085,6 +1090,42 @@ describe('Ziron', () => {
       }).to.throw(InsufficientBufferSizeError);
     });
 
+  });
+
+  describe('GroupTransport (Utility)', () => {
+
+    it(`Should correctly send multiple transmits to all underlying transporters with Batching.`, (done) => {
+      const count = 20;
+
+      let receivedI = 0;
+      const receiver = (event,data) => {
+        expect(event).to.be.equal('group');
+        expect(data).to.be.equal('msg');
+        receivedI++;
+        if(receivedI === (count * 2)) done();
+      }
+      comB1.onTransmit = receiver;
+      comB2.onTransmit = receiver;
+
+      for(let i = 0; i < count; i++)
+        comBGroup.transmit('group','msg',{batch: 50});
+    });
+
+    it(`Should correctly send transmit to all underlying sources.`, (done) => {
+      const data = {pic: new ArrayBuffer(10),code: new ArrayBuffer(30)};
+
+      let receivedI = 0;
+      const receiver = (event,receivedData) => {
+        expect(event).to.be.equal('group');
+        expect(receivedData).to.be.deep.equal(data);
+        receivedI++;
+        if(receivedI === 2) done();
+      }
+      comB1.onTransmit = receiver;
+      comB2.onTransmit = receiver;
+
+      comBGroup.transmit('group',data,{processComplexTypes: true});
+    });
   });
 
 });
