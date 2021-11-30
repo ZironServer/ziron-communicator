@@ -28,8 +28,7 @@ export default class PackageBuffer {
     private _bufferTimeoutTicker: NodeJS.Timeout | undefined;
     private _bufferTimeoutTimestamp: number | undefined;
 
-    public maxBufferSize: number = Number.POSITIVE_INFINITY;
-
+    public static maxBufferSize: number = Number.POSITIVE_INFINITY;
     /**
      * Used to find out the UTF-8 byte size of a string to detect if the buffer space is enough.
      * Defaults to guessStringSize for performance reasons but can be
@@ -39,6 +38,7 @@ export default class PackageBuffer {
     public static maxBufferChunkLength: number = 200;
     public static limitBatchStringPacketLength: number = 310000;
 
+    public maxBufferSize: number = PackageBuffer.maxBufferSize;
     public maxBufferChunkLength: number = PackageBuffer.maxBufferChunkLength;
     public limitBatchStringPacketLength: number = PackageBuffer.limitBatchStringPacketLength;
 
