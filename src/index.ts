@@ -28,9 +28,11 @@ import {dehydrateError, hydrateError} from "./lib/ErrorUtils";
 import StreamCloseError from "./lib/streams/StreamCloseError";
 import { PreparedPackage } from "./lib/PreparedPackage";
 import PackageBuffer from "./lib/PackageBuffer";
+import GroupTransport from "./lib/GroupTransport";
 
 export {
     Transport,
+    GroupTransport,
     PackageBuffer,
     InsufficientBufferSizeError,
     JSONString,
