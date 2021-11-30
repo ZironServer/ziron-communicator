@@ -30,8 +30,8 @@ export default class GroupTransport {
      * the function can always return true.
      */
     constructor(
-        private readonly send: (msg: string | ArrayBuffer) => void,
-        public isConnected: () => boolean = () => true
+        public readonly send: (msg: string | ArrayBuffer) => void,
+        public readonly isConnected: () => boolean = () => true
     ) {
         this.buffer = new PackageBuffer(this.send,isConnected);
     }
