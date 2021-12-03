@@ -29,6 +29,7 @@ import StreamCloseError from "./lib/streams/StreamCloseError";
 import { PreparedPackage } from "./lib/PreparedPackage";
 import PackageBuffer from "./lib/PackageBuffer";
 import GroupTransport from "./lib/GroupTransport";
+import {escapeJSONString} from "./lib/Utils";
 
 export {
     Transport,
@@ -58,5 +59,6 @@ export {
     ComplexTypesOption,
     hydrateError,
     dehydrateError,
-    BackError
+    BackError,
+    escapeJSONString
 }

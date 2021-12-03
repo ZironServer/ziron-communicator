@@ -624,6 +624,8 @@ export default class Transport {
      * It is perfect to prepare packages when the connection
      * is lost and send them when the socket is connected again.
      * @param receiver
+     * It should not contain double-quotes.
+     * To be sure, you can use the escapeJSONString function.
      * @param data
      * @param processComplexTypes
      */
@@ -668,6 +670,8 @@ export default class Transport {
      * It is perfect to prepare packages when the connection
      * is lost and send them when the socket is connected again.
      * @param procedure
+     * It should not contain double-quotes.
+     * To be sure, you can use the escapeJSONString function.
      * @param data
      * @param ackTimeout
      * @param processComplexTypes
@@ -968,6 +972,8 @@ export default class Transport {
      * Notice that streams are not supported but binaries are supported.
      * After preparing you should not wait a long time to send the package to the targets.
      * @param receiver
+     * It should not contain double-quotes.
+     * To be sure, you can use the escapeJSONString function.
      * @param data
      * @param processComplexTypes
      */
