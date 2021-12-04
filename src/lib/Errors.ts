@@ -4,6 +4,8 @@ GitHub: LucaCode
 Copyright(c) Ing. Luca Gian Scaringella
  */
 
+import {MAX_SUPPORTED_ARRAY_BUFFER_SIZE} from "./Utils";
+
 export enum TimeoutType {
     BinaryResolve,
     InvokeResponse
@@ -49,5 +51,13 @@ export class InsufficientBufferSizeError extends Error {
     constructor(public readonly bufferType: string) {
         super("Insufficient buffer size");
         this.name = "InsufficientBufferSizeError";
+    }
+}
+
+export class MaxSupportedArrayBufferSizeExceededError extends Error {
+    public static readonly MAX_SUPPORTED_ARRAY_BUFFER_SIZE = MAX_SUPPORTED_ARRAY_BUFFER_SIZE;
+    constructor(public readonly arrayBuffer: ArrayBuffer) {
+        super(`Max supported array buffer size: ${MAX_SUPPORTED_ARRAY_BUFFER_SIZE} exceeded.`);
+        this.name = "MaxSupportedArrayBufferSizeExceededError";
     }
 }
