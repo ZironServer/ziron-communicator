@@ -9,7 +9,7 @@ Copyright(c) Ing. Luca Gian Scaringella
  * The first packet is always the string header packet,
  * followed by optional binary packets.
  */
-export type PreparedPackage = [string,...ArrayBuffer[]] & {
+export type PreparedPackage = [string,ArrayBuffer?] & {
     /**
      * @description
      * Used to set the ack timeout.
