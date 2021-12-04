@@ -7,6 +7,7 @@ Copyright(c) Ing. Luca Gian Scaringella
 import PackageBuffer from "./PackageBuffer";
 import {PreparedPackage} from "./PreparedPackage";
 import Transport, {ComplexTypesOption} from "./Transport";
+import {SendFunction} from "./Utils";
 
 /**
  * @description
@@ -30,7 +31,7 @@ export default class GroupTransport {
      * the function can always return true.
      */
     constructor(
-        public readonly send: (msg: string | ArrayBuffer) => void,
+        public readonly send: SendFunction,
         public readonly isConnected: () => boolean = () => true
     ) {
         this.buffer = new PackageBuffer(this.send,isConnected);
@@ -39,8 +40,7 @@ export default class GroupTransport {
     private _directSendMultiTransmit(preparedPackage: PreparedPackage) {
         this.send(preparedPackage[0]);
         if(preparedPackage.length > 1)
-            for(let i = 1, len = preparedPackage.length; i < len; i++)
-                this.send(preparedPackage[i]);
+            this.send(preparedPackage[1]!,true);
         if(preparedPackage._afterSend) preparedPackage._afterSend();
     }
 
