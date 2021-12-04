@@ -912,9 +912,13 @@ describe('Ziron', () => {
       comA1.buffer.limitBatchStringPacketLength = 20000;
       for(let i = 0; i < dataLength; i++){
         //send text and binary packages
-        const data = i % 2 === 0 ? new ArrayBuffer(i) : i;
+        const data = i % 4 === 0 ? new ArrayBuffer(i) : i % 10 === 0 ? {
+          b: new ArrayBuffer(20),
+          c: {b2: new ArrayBuffer(i)}
+        } : i;
         sendMessages.push(data);
-        comA1.transmit('batch',data,{batch: 100,processComplexTypes: i % 2 === 0});
+        comA1.transmit('batch',data,{batch: 100,
+          processComplexTypes: i % 4 === 0 || i % 10 === 0});
       }
     });
 
