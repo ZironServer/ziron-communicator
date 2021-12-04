@@ -4,15 +4,22 @@ GitHub: LucaCode
 Copyright(c) Ing. Luca Gian Scaringella
  */
 
-import {ActionPacket, BundlePacket, PacketType,} from "./Protocol";
+import {ActionPacket, BundlePacket, NEXT_BINARIES_PACKET_TOKEN, PacketType,} from "./Protocol";
 import {containsStreams, DataType, isMixedJSONDataType, parseJSONDataType} from "./DataType";
 import {dehydrateError, hydrateError} from "./ErrorUtils";
 import {decodeJson, encodeJson, JSONString} from "./JsonUtils";
 import ReadStream from "./streams/ReadStream";
 import WriteStream from "./streams/WriteStream";
 import {StreamErrorCloseCode} from "./streams/StreamErrorCloseCode";
-import {RESOLVED_PROMISE, Writable} from "./Utils";
-import {BadConnectionError, BadConnectionType, InvalidActionError, TimeoutError, TimeoutType} from "./Errors";
+import {MAX_SUPPORTED_ARRAY_BUFFER_SIZE, RESOLVED_PROMISE, SendFunction, Writable} from "./Utils";
+import {
+    BadConnectionError,
+    BadConnectionType,
+    InvalidActionError,
+    MaxSupportedArrayBufferSizeExceededError,
+    TimeoutError,
+    TimeoutType
+} from "./Errors";
 import {PreparedInvokePackage, PreparedPackage} from "./PreparedPackage";
 import PackageBuffer from "./PackageBuffer";
 
@@ -28,6 +35,11 @@ export interface ComplexTypesOption {
 export type TransmitListener = (receiver: string, data: any, type: DataType) => void | Promise<void>;
 export type InvokeListener = (procedure: string, data: any, end: (data?: any, processComplexTypes?: boolean) => void,
     reject: (err?: any) => void, type: DataType) => void | Promise<void>
+
+type BinaryContentResolver = {
+    callback: (err?: Error | null,binaries?: ArrayBuffer[]) => void,
+    timeout: NodeJS.Timeout
+};
 
 const PING = 57;
 const PING_BINARY = new Uint8Array([PING]);
@@ -49,7 +61,6 @@ export default class Transport {
 
     public static ackTimeout: number = 10000;
     public static binaryResolveTimeout: number = 10000;
-    public static packetBinaryResolverLimit: number = 40;
     public static packetStreamLimit: number = 20;
     public static streamsEnabled: boolean = true;
     public static chunksCanContainStreams: boolean = false;
@@ -65,12 +76,12 @@ export default class Transport {
     public onInvoke: InvokeListener;
     public onPing: () => void;
     public onPong: () => void;
-    private _send: (msg: string | ArrayBuffer) => void;
-    public set send(value: (msg: string | ArrayBuffer) => void) {
+    private _send: SendFunction;
+    public set send(value: SendFunction) {
         this._send = value;
         this.buffer.send = value;
     }
-    public get send(): (msg: string | ArrayBuffer) => void {
+    public get send(): SendFunction {
         return this._send;
     }
     public hasLowBackpressure: () => boolean;
@@ -110,8 +121,8 @@ export default class Transport {
      * Can not be reset on connection lost
      * because prepared packets with old ids can exist.
      */
-    private _binaryPlaceHolderId: number = 0;
-    private _binaryResolver: Record<number,{resolve: (binary: ArrayBuffer) => void,reject: (err: any) => void,timeout: NodeJS.Timeout}> = {};
+    private _binaryContentPacketId: number = 0;
+    private _binaryContentResolver: Record<number,BinaryContentResolver> = {};
 
     /**
      * Can not be reset on connection lost
@@ -203,7 +214,7 @@ export default class Transport {
         this.buffer.clearBatchTime();
         const err = new BadConnectionError(type,msg);
         (this as Writable<Transport>).badConnectionTimestamp = Date.now();
-        this._clearBinaryResolver();
+        this._rejectBinaryContentResolver(err);
         this._rejectInvokeRespPromises(err);
         this._emitBadConnectionToStreams();
         this._activeReadStreams = {};
@@ -231,9 +242,9 @@ export default class Transport {
         }
     }
 
-    private _getNewBinaryPlaceholderId() {
-        if(this._binaryPlaceHolderId > Number.MAX_SAFE_INTEGER) this._binaryPlaceHolderId = 0;
-        return this._binaryPlaceHolderId++;
+    private _getNewBinaryContentPacketId() {
+        if(this._binaryContentPacketId > Number.MAX_SAFE_INTEGER) this._binaryContentPacketId = 0;
+        return this._binaryContentPacketId++;
     }
 
     private _getNewCid(): number {
@@ -258,20 +269,39 @@ export default class Transport {
 
     private _processBinaryPacket(buffer: ArrayBuffer) {
         const header = (new Uint8Array(buffer,0,1))[0];
-        if(header === PacketType.BinaryReference) {
-            const id = (new Float64Array(buffer.slice(1,9)))[0];
-            const resolver = this._binaryResolver[id];
-            if(resolver){
-                delete this._binaryResolver[id];
-                clearTimeout(resolver.timeout);
-                resolver.resolve(buffer.slice(9));
-            }
-        }
+        if(header === PacketType.BinaryContent)
+            this._processBinaryContentPacket(new DataView(buffer),1)
         else if(header === PacketType.StreamChunk)
             this._processBinaryStreamChunk((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9));
         else if(header === PacketType.StreamEnd)
             this._processBinaryStreamEnd((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9));
         else this.onInvalidMessage(new Error('Unknown binary package header type.'))
+    }
+
+    private _processBinaryContentPacket(view: DataView, offset: number) {
+        const id = view.getFloat64(offset)
+        const resolver = this._binaryContentResolver[id],
+            byteLength = view.byteLength,
+            binaries: ArrayBuffer[] = [];
+        let binaryLen: number;
+        offset += 8;
+
+        while(offset < byteLength) {
+            binaryLen = view.getUint32(offset);
+            offset += 4;
+            if(binaryLen === NEXT_BINARIES_PACKET_TOKEN) {
+                this._processBinaryContentPacket(view,offset);
+                break;
+            }
+            if(resolver)
+                binaries.push(view.buffer.slice(offset,offset + binaryLen));
+            offset += binaryLen;
+        }
+        if(resolver){
+            delete this._binaryContentResolver[id];
+            clearTimeout(resolver.timeout);
+            resolver.callback(null,binaries);
+        }
     }
 
     private _processTransmit(receiver: string,data: any,dataType: DataType) {
@@ -283,13 +313,13 @@ export default class Transport {
         switch (packet['0']) {
             case PacketType.Transmit:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
-                return this._processData(packet['2'],packet['3'])
+                return this._processData(packet['2'],packet['3'],packet['4'])
                     .then(data => this._processTransmit(packet['1'],data,packet['2']))
                     .catch(this.onInvalidMessage);
             case PacketType.Invoke:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
-                return this._processData(packet['3'],packet['4'])
+                return this._processData(packet['3'],packet['4'],packet['5'])
                     .then(data => this._processInvoke(packet['1'],packet['2'],data,packet['3']))
                     .catch(this.onInvalidMessage);
             case PacketType.InvokeDataResp:
@@ -297,14 +327,14 @@ export default class Transport {
                 if (resp) {
                     clearTimeout(resp.timeout!);
                     delete this._invokeResponsePromises[packet['1']];
-                    return this._processData(packet['2'],packet['3'])
+                    return this._processData(packet['2'],packet['3'],packet['4'])
                         .then(data => resp.resolve(resp.returnDataType ? [data,packet['2']] : data))
                         .catch(this.onInvalidMessage);
                 }
                 return;
-            case PacketType.StreamChunk: return this._processJsonStreamChunk(packet['1'],packet['2'],packet['3']);
+            case PacketType.StreamChunk: return this._processJsonStreamChunk(packet['1'],packet['2'],packet['3'],packet['4']);
             case PacketType.StreamDataPermission: return this._processStreamDataPermission(packet['1'],packet['2']);
-            case PacketType.StreamEnd: return this._processJsonStreamEnd(packet['1'],packet['2'],packet['3']);
+            case PacketType.StreamEnd: return this._processJsonStreamEnd(packet['1'],packet['2'],packet['3'],packet['4']);
             case PacketType.InvokeErrResp: return this._rejectInvoke(packet['1'],packet['2']);
             case PacketType.ReadStreamClose: return this._processReadStreamClose(packet['1'], packet['2']);
             case PacketType.StreamAccept: return this._processStreamAccept(packet['1'],packet['2']);
@@ -347,22 +377,22 @@ export default class Transport {
         if(stream) stream._close(code);
     }
 
-    private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any) {
+    private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any, binariesPacketId?: number) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
             if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
                 throw new Error('Streams in chunks are not allowed.');
-            stream._pushChunk(this._processData(dataType,data),dataType);
+            stream._pushChunk(this._processData(dataType,data,binariesPacketId),dataType);
         }
     }
 
-    private _processJsonStreamEnd(streamId: number, dataType?: DataType, data?: any) {
+    private _processJsonStreamEnd(streamId: number, dataType?: DataType, data?: any, binariesPacketId?: number) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
             if(typeof dataType === 'number') {
                 if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
                     throw new Error('Streams in chunks are not allowed.');
-                stream._pushChunk(this._processData(dataType,data),dataType);
+                stream._pushChunk(this._processData(dataType,data,binariesPacketId),dataType);
             }
             stream._end();
         }
@@ -396,8 +426,7 @@ export default class Transport {
                 called = true;
                 if(badConnectionTimestamp !== this.badConnectionTimestamp) return;
                 this._send(PacketType.InvokeErrResp + ',' +
-                    callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err)))
-                );
+                    callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err))));
             },dataType);
         }
         catch(err) {this._onListenerError(err);}
@@ -423,133 +452,171 @@ export default class Transport {
             data._onTransmitted();
         }
         else if(data instanceof ArrayBuffer) {
-            const binaryId = this._getNewBinaryPlaceholderId();
+            const binaryContentPacketId = this._getNewBinaryContentPacketId();
             this._send(PacketType.InvokeDataResp + ',' + callId + ',' +
-                DataType.Binary + ',' + binaryId);
-            this._send(Transport._createBinaryReferencePacket(binaryId,data));
+                DataType.Binary + ',' + binaryContentPacketId);
+            this._send(Transport._createBinaryContentPacket(binaryContentPacketId,data),true);
         }
         else {
-            const preparedPackage: PreparedPackage = [] as any;
-            const streams: WriteStream<any>[] = [];
-            preparedPackage.length = 1;
-            data = this._processMixedJSONDeep(data,preparedPackage,streams);
+            const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
+            data = this._processMixedJSONDeep(data,binaries,streams);
 
+            const preparedPackage: PreparedPackage = [
+                PacketType.InvokeDataResp + ',' + callId + ',' +
+                parseJSONDataType(binaries.length > 0, streams.length > 0) +
+                    (data !== undefined ? (',' + encodeJson(data)) : '')
+            ];
+
+            if(binaries.length > 0) {
+                const binaryContentPacketId = this._getNewBinaryContentPacketId();
+                preparedPackage[0] += "," + binaryContentPacketId;
+                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+            }
             if(streams.length > 0)
                 preparedPackage._afterSend = () => {for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();}
 
-            preparedPackage[0] = PacketType.InvokeDataResp + ',' + callId + ',' +
-                parseJSONDataType(preparedPackage.length > 1, streams.length > 0) +
-                (data !== undefined ? (',' + encodeJson(data)) : '');
-            for(let i = 0; i < preparedPackage.length; i++) this._send(preparedPackage[i])
+            this._send(preparedPackage[0]);
+            if(preparedPackage.length > 1) this._send(preparedPackage[1]!, true);
         }
     }
 
-    private _processData(type: DataType, data: any): Promise<any> {
+    private _processData(type: DataType, data: any, dataMetaInfo: any): Promise<any> {
         if (type === DataType.JSON) return Promise.resolve(data);
         else if (type === DataType.Binary) {
-            if(typeof data !== 'number') throw new Error('Invalid binary placeholder type.');
-            return this._createBinaryResolver(data);
+            if(typeof data !== 'number') throw new Error('Invalid binary packet id.');
+            return new Promise((res,rej) => {
+                this._resolveBinaryContent(data,(err,binaries) => {
+                    err ? rej(err) : res(binaries![0])
+                });
+            })
         } else if (isMixedJSONDataType(type)) {
-            const promises: Promise<any>[] = [];
-            const wrapper = [data];
-            this._resolveMixedJSONDeep(wrapper, 0, promises, {
+            const resolveOptions = {
                 parseStreams: Transport.streamsEnabled &&
                     (type === DataType.JSONWithStreams || type === DataType.JSONWithStreamsAndBinaries),
                 parseBinaries: type === DataType.JSONWithBinaries || type === DataType.JSONWithStreamsAndBinaries
-            });
-            return new Promise(async resolve => {
-                await Promise.all(promises);
-                resolve(wrapper[0]);
-            });
+            };
+            if(typeof dataMetaInfo === 'number') return new Promise((res,rej) => {
+                this._resolveBinaryContent(dataMetaInfo,(err, binaries) => {
+                    err ? rej(err) : res(this._resolveMixedJSONDeep(data,resolveOptions,binaries!));
+                })
+            })
+            else return Promise.resolve(this._resolveMixedJSONDeep(data,resolveOptions));
         } else if(type === DataType.Stream && Transport.streamsEnabled) {
-            if(typeof data !== 'number') throw new Error('StreamId is not a number.');
+            if(typeof data !== 'number') throw new Error('Invalid stream id.');
             return Promise.resolve(new Transport.readStream(data,this));
         }
         else throw new Error('Invalid data type.');
     }
 
-    private _createBinaryResolver(id: number): Promise<ArrayBuffer> {
-        if(this._binaryResolver[id]) throw new Error('Binary placeholder already exists.');
-        return new Promise<ArrayBuffer>((resolve, reject) => {
-            this._binaryResolver[id] = {
-                resolve,
-                reject,
-                timeout: setTimeout(() => {
-                    delete this._binaryResolver[id];
-                    reject(new TimeoutError(`Binary placeholder: ${id} not resolved in time.`,TimeoutType.BinaryResolve));
-                }, Transport.binaryResolveTimeout)
-            };
-        });
+    private _resolveBinaryContent(binariesPacketId: number, callback: (error?: any,binaries?: ArrayBuffer[]) => void) {
+        if(this._binaryContentResolver[binariesPacketId]) throw new Error('Binaries resolver already exists.');
+        this._binaryContentResolver[binariesPacketId] = {
+            callback,
+            timeout: setTimeout(() => {
+                delete this._binaryContentResolver[binariesPacketId];
+                callback(new TimeoutError(`Binaries resolver: ${binariesPacketId} not resolved in time.`,TimeoutType.BinaryResolve));
+            }, Transport.binaryResolveTimeout)
+        };
     }
 
-    private _resolveMixedJSONDeep(obj: any, key: any, binaryResolverPromises: Promise<any>[],
+    private _resolveMixedJSONDeep(data: any,
                                   options: {parseStreams: boolean, parseBinaries: boolean},
-                                  meta: {streamCount:  number} = {streamCount: 0}): any
+                                  binaries?: ArrayBuffer[]): Promise<any>
+    {
+        const wrapper = [data];
+        this._internalResolveMixedJSONDeep(wrapper, 0, options, {binaries, streamCount: 0});
+        return wrapper[0];
+    }
+
+    private _internalResolveMixedJSONDeep(obj: any, key: any,
+                                  options: {parseStreams: boolean, parseBinaries: boolean},
+                                  meta: {
+                                    binaries?: ArrayBuffer[],
+                                    streamCount: number
+                                  }): any
     {
         const value = obj[key];
         if(typeof value === 'object' && value) {
             if(Array.isArray(value)) {
                 const len = value.length;
-                for (let i = 0; i < len; i++) this._resolveMixedJSONDeep(value, i, binaryResolverPromises, options);
+                for (let i = 0; i < len; i++)
+                    this._internalResolveMixedJSONDeep(value,i,options,meta);
             }
             else  {
-                if(options.parseBinaries && typeof value['__binary__'] === 'number'){
-                    if(binaryResolverPromises.length >= Transport.packetBinaryResolverLimit)
-                        throw new Error('Max binary resolver limit reached.')
-                    binaryResolverPromises.push(new Promise(async (resolve) => {
-                        // noinspection JSUnfilteredForInLoop
-                        obj[key] = await this._createBinaryResolver(value['__binary__']);
-                        resolve();
-                    }));
+                if(options.parseBinaries && typeof value['_b'] === 'number') {
+                    if(!meta.binaries) throw new Error('Can not resolve binary data without binary content packet.');
+                    obj[key] = meta.binaries[value['_b']];
                 }
-                else if(options.parseStreams && typeof value['__stream__'] === 'number'){
-                    if(meta.streamCount >= Transport.packetStreamLimit)
-                        throw new Error('Max stream limit reached.')
+                else if(options.parseStreams && typeof value['_s'] === 'number'){
+                    if(meta.streamCount >= Transport.packetStreamLimit) throw new Error('Max stream limit reached.')
                     meta.streamCount++;
-                    obj[key] = new Transport.readStream(value['__stream__'],this);
+                    obj[key] = new Transport.readStream(value['_s'],this);
                 }
-                else for(const key in value) this._resolveMixedJSONDeep(value, key, binaryResolverPromises, options);
+                else for(const key in value)
+                    this._internalResolveMixedJSONDeep(value,key,options,meta);
             }
         }
     }
 
-    private static _createBinaryReferencePacket(id: number, binary: ArrayBuffer): ArrayBuffer {
-        const packetBuffer = new Uint8Array(9 + binary.byteLength);
-        packetBuffer[0] = PacketType.BinaryReference;
-        packetBuffer.set(new Uint8Array((new Float64Array([id])).buffer),1);
-        packetBuffer.set(new Uint8Array(binary),9);
-        return packetBuffer.buffer;
+    private static _createBinaryContentPacket(refId: number, content: ArrayBuffer | ArrayBuffer[]): ArrayBuffer {
+        if(content instanceof ArrayBuffer) {
+            if(content.byteLength > MAX_SUPPORTED_ARRAY_BUFFER_SIZE)
+                throw new MaxSupportedArrayBufferSizeExceededError(content);
+
+            const packetBuffer = new DataView(new ArrayBuffer(13 + content.byteLength));
+            const uint8PacketView = new Uint8Array(packetBuffer.buffer);
+            packetBuffer.setInt8(0,PacketType.BinaryContent);
+            packetBuffer.setFloat64(1,refId);
+            packetBuffer.setUint32(9,content.byteLength);
+            uint8PacketView.set(new Uint8Array(content),13);
+            return packetBuffer.buffer;
+        }
+        else {
+            const len = content.length;
+
+            //Calculate size
+            let size = 9 + len * 4, i, bi, item: ArrayBuffer;
+            for(i = 0; i < len; i++) size += content[i].byteLength;
+
+            const packetBuffer = new DataView(new ArrayBuffer(size));
+            const uint8PacketView = new Uint8Array(packetBuffer.buffer);
+            packetBuffer.setInt8(0,PacketType.BinaryContent);
+            packetBuffer.setFloat64(1,refId);
+            for(i = 0, bi = 9; i < len; i++) {
+                item = content[i];
+                if(item.byteLength > MAX_SUPPORTED_ARRAY_BUFFER_SIZE)
+                    throw new MaxSupportedArrayBufferSizeExceededError(item);
+                packetBuffer.setUint32(bi,item.byteLength);
+                uint8PacketView.set(new Uint8Array(item),bi+=4);
+                bi += item.byteLength;
+            }
+            return packetBuffer.buffer;
+        }
     }
 
-    private _processMixedJSONDeep(data: any, binaryReferencePackets: any[], streams: WriteStream<any>[]) {
+    private _processMixedJSONDeep(data: any, binaries: ArrayBuffer[], streams: WriteStream<any>[]) {
         if(typeof data === 'object' && data){
-            if(data instanceof ArrayBuffer){
-                const placeholderId = this._getNewBinaryPlaceholderId();
-                binaryReferencePackets.push(Transport._createBinaryReferencePacket(placeholderId, data));
-                return {__binary__: placeholderId};
-            }
+            if(data instanceof ArrayBuffer) return {_b: binaries.push(data) - 1};
             else if(data instanceof WriteStream){
                 if(Transport.streamsEnabled){
                     const streamId = this._getNewStreamId(data.binary);
                     data._init(this,streamId);
                     streams.push(data);
-                    return {__stream__: streamId}
+                    return {_s: streamId}
                 }
                 else return data.toJSON();
             }
             else if(Array.isArray(data)) {
-                const newArray: any[] = [];
-                const len = data.length;
-                for (let i = 0; i < len; i++) {
-                    newArray[i] = this._processMixedJSONDeep(data[i], binaryReferencePackets, streams);
-                }
+                const newArray: any[] = [], len = data.length;
+                for (let i = 0; i < len; i++)
+                    newArray[i] = this._processMixedJSONDeep(data[i], binaries, streams);
                 return newArray;
             }
             else if(!(data instanceof Date)) {
                 const clone = {};
                 for(const key in data) {
                     // noinspection JSUnfilteredForInLoop
-                    clone[key] = this._processMixedJSONDeep(data[key], binaryReferencePackets, streams);
+                    clone[key] = this._processMixedJSONDeep(data[key], binaries, streams);
                 }
                 return clone;
             }
@@ -557,13 +624,16 @@ export default class Transport {
         return data;
     }
 
-    private _clearBinaryResolver() {
-        for(const k in this._binaryResolver) {
-            if(this._binaryResolver.hasOwnProperty(k)){
-                clearTimeout(this._binaryResolver[k].timeout);
+    private _rejectBinaryContentResolver(err: Error) {
+        let resolver: BinaryContentResolver;
+        for(const k in this._binaryContentResolver) {
+            if(this._binaryContentResolver.hasOwnProperty(k)){
+                resolver = this._binaryContentResolver[k];
+                clearTimeout(resolver.timeout);
+                resolver.callback(err);
             }
         }
-        this._binaryResolver = {};
+        this._binaryContentResolver = {};
     }
 
     private _emitBadConnectionToStreams() {
@@ -643,22 +713,28 @@ export default class Transport {
             return packet;
         }
         else if(data instanceof ArrayBuffer) {
-            const binaryId = this._getNewBinaryPlaceholderId();
+            const binaryContentPacketId = this._getNewBinaryContentPacketId();
             return [PacketType.Transmit + ',"' + receiver + '",' +
-                DataType.Binary + ',' + binaryId, Transport._createBinaryReferencePacket(binaryId,data)];
+                DataType.Binary + ',' + binaryContentPacketId,
+                Transport._createBinaryContentPacket(binaryContentPacketId,data)];
         }
         else {
-            const preparedPackage: PreparedPackage = [] as any;
-            const streams: WriteStream<any>[] = [];
-            preparedPackage.length = 1;
-            data = this._processMixedJSONDeep(data,preparedPackage,streams);
+            const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
+            data = this._processMixedJSONDeep(data,binaries,streams);
 
+            const preparedPackage: PreparedPackage = [
+                PacketType.Transmit + ',"' + receiver + '",' +
+                parseJSONDataType(binaries.length > 0,streams.length > 0) +
+                (data !== undefined ? (',' + encodeJson(data)) : '')
+            ];
+
+            if(binaries.length > 0) {
+                const binaryContentPacketId = this._getNewBinaryContentPacketId();
+                preparedPackage[0] += "," + binaryContentPacketId;
+                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+            }
             if(streams.length > 0)
                 preparedPackage._afterSend = () => {for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();}
-
-            preparedPackage[0] = PacketType.Transmit + ',"' + receiver + '",' +
-                parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
-                (data !== undefined ? (',' + encodeJson(data)) : '');
             return preparedPackage;
         }
     }
@@ -734,16 +810,16 @@ export default class Transport {
                     setResponse!();
                     setResponseTimeout!();
                 }
-                const binaryId = this._getNewBinaryPlaceholderId();
+                const binaryContentPacketId = this._getNewBinaryContentPacketId();
                 preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
-                    DataType.Binary + ',' + binaryId;
-                preparedPackage[1] = Transport._createBinaryReferencePacket(binaryId,data);
+                    DataType.Binary + ',' + binaryContentPacketId;
+                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,data);
                 return preparedPackage;
             }
             else {
-                preparedPackage.length = 1;
-                const streams: WriteStream<any>[] = [];
-                data = this._processMixedJSONDeep(data,preparedPackage,streams);
+                const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
+                data = this._processMixedJSONDeep(data,binaries,streams);
+
                 if(streams.length > 0) {
                     const sent = new Promise(res => preparedPackage._afterSend = () => {
                         setResponse!();
@@ -756,9 +832,17 @@ export default class Transport {
                     setResponse!();
                     setResponseTimeout!();
                 }
+
                 preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
-                    parseJSONDataType(preparedPackage.length > 1,streams.length > 0) +
+                    parseJSONDataType(binaries.length > 0,streams.length > 0) +
                     (data !== undefined ? (',' + encodeJson(data)) : '');
+
+                if(binaries.length > 0) {
+                    const binaryContentPacketId = this._getNewBinaryContentPacketId();
+                    preparedPackage[0] += "," + binaryContentPacketId;
+                    preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+                }
+
                 return preparedPackage;
             }
         }
@@ -811,19 +895,19 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     sendPing() {
-        try {this._send(PING_BINARY);}
+        try {this._send(PING_BINARY,true);}
         catch (_) {}
     }
 
     // noinspection JSUnusedGlobalSymbols
     sendPong() {
-        try {this._send(PONG_BINARY);}
+        try {this._send(PONG_BINARY,true);}
         catch (_) {}
     }
 
     private _directSendPreparedPackage(preparedPackage: PreparedPackage) {
-        if(preparedPackage.length === 1) this._send(preparedPackage[0]);
-        else for(let i = 0, len = preparedPackage.length; i < len; i++) this._send(preparedPackage[i]);
+        this._send(preparedPackage[0])
+        if(preparedPackage.length > 1) this._send(preparedPackage[1]!,true);
         if(preparedPackage._afterSend) preparedPackage._afterSend();
     }
 
@@ -849,18 +933,26 @@ export default class Transport {
             data._init(this,streamId);
             data._onTransmitted();
         }
-        else if(data instanceof ArrayBuffer) this._send(
-            Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),end));
+        else if(data instanceof ArrayBuffer)
+            this._send(Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),end),true);
         else {
-            const packets: (string | ArrayBuffer)[] = [];
-            const streams: WriteStream<any>[] = [];
-            packets.length = 1;
-            data = this._processMixedJSONDeep(data,packets,streams);
+            const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
+            data = this._processMixedJSONDeep(data,binaries,streams);
 
-            packets[0] = (end ? PacketType.StreamEnd : PacketType.StreamChunk) +
-                ',' + streamId + ',' + parseJSONDataType(packets.length > 1 || streams.length > 0) +
-                (data !== undefined ? (',' + encodeJson(data)) : '');
-            for(let i = 0; i < packets.length; i++) this._send(packets[i])
+            const preparedPackage: PreparedPackage = [
+                (end ? PacketType.StreamEnd : PacketType.StreamChunk) +
+                ',' + streamId + ',' + parseJSONDataType(binaries.length > 0 || streams.length > 0) +
+                (data !== undefined ? (',' + encodeJson(data)) : '')
+            ];
+
+            if(binaries.length > 0) {
+                const binaryContentPacketId = this._getNewBinaryContentPacketId();
+                preparedPackage[0] += "," + binaryContentPacketId;
+                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+            }
+
+            this._send(preparedPackage[0]);
+            if(preparedPackage.length > 1) this._send(preparedPackage[1]!,true);
             for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();
         }
     }
@@ -872,7 +964,7 @@ export default class Transport {
      * packet directly (faster than using _sendStreamChunk).
      */
     _sendBinaryStreamChunk(streamId: number, binaryPart: Uint8Array, end?: boolean) {
-        this._send(Transport._createBinaryStreamChunkPacket(streamId,binaryPart,end))
+        this._send(Transport._createBinaryStreamChunkPacket(streamId,binaryPart,end),true)
     }
 
     /**
@@ -957,11 +1049,11 @@ export default class Transport {
 
     //Multi transport
 
-    private static _binaryMultiPlaceHolderId: number = -1;
+    private static _multiBinaryContentPacketId: number = -1;
 
-    private static _getNewBinaryMultiPlaceholderId() {
-        if(Transport._binaryMultiPlaceHolderId < Number.MIN_SAFE_INTEGER) Transport._binaryMultiPlaceHolderId = -1;
-        return Transport._binaryMultiPlaceHolderId--;
+    private static _getNewMultiBinaryContentPacketId() {
+        if(Transport._multiBinaryContentPacketId < Number.MIN_SAFE_INTEGER) Transport._multiBinaryContentPacketId = -1;
+        return Transport._multiBinaryContentPacketId--;
     }
 
     /**
@@ -983,41 +1075,42 @@ export default class Transport {
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
         else if(data instanceof ArrayBuffer) {
-            const binaryId = Transport._getNewBinaryMultiPlaceholderId();
+            const binaryContentPacketId = Transport._getNewMultiBinaryContentPacketId();
             return [PacketType.Transmit + ',"' + receiver + '",' +
-                DataType.Binary + ',' + binaryId, Transport._createBinaryReferencePacket(binaryId,data)];
+                DataType.Binary + ',' + binaryContentPacketId,
+                Transport._createBinaryContentPacket(binaryContentPacketId,data)];
         }
         else {
-            const preparedPackage: PreparedPackage = [] as any;
-            preparedPackage.length = 1;
-            data = Transport._processMultiMixedJSONDeep(data,preparedPackage);
-            preparedPackage[0] = PacketType.Transmit + ',"' + receiver + '",' +
-                parseJSONDataType(preparedPackage.length > 1,false) +
-                (data !== undefined ? (',' + encodeJson(data)) : '');
+            const binaries: ArrayBuffer[] = [];
+            data = Transport._processMultiMixedJSONDeep(data,binaries);
+            const preparedPackage: PreparedPackage = [
+                PacketType.Transmit + ',"' + receiver + '",' +
+                parseJSONDataType(binaries.length > 0,false) +
+                (data !== undefined ? (',' + encodeJson(data)) : '')
+            ];
+            if(binaries.length > 0) {
+                const binaryContentPacketId = Transport._getNewMultiBinaryContentPacketId();
+                preparedPackage[0] += "," + binaryContentPacketId;
+                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+            }
             return preparedPackage;
         }
     }
 
-    private static _processMultiMixedJSONDeep(data: any, binaryReferencePackets: any[]) {
+    private static _processMultiMixedJSONDeep(data: any, binaries: ArrayBuffer[]) {
         if(typeof data === 'object' && data){
-            if(data instanceof ArrayBuffer){
-                const placeholderId = Transport._getNewBinaryMultiPlaceholderId();
-                binaryReferencePackets.push(Transport._createBinaryReferencePacket(placeholderId, data));
-                return {__binary__: placeholderId};
-            }
+            if(data instanceof ArrayBuffer) return {_b: binaries.push(data) - 1};
             else if(Array.isArray(data)) {
-                const newArray: any[] = [];
-                const len = data.length;
-                for (let i = 0; i < len; i++) {
-                    newArray[i] = Transport._processMultiMixedJSONDeep(data[i], binaryReferencePackets);
-                }
+                const newArray: any[] = [], len = data.length;
+                for (let i = 0; i < len; i++)
+                    newArray[i] = Transport._processMultiMixedJSONDeep(data[i],binaries);
                 return newArray;
             }
             else if(!(data instanceof Date)) {
                 const clone = {};
                 for(const key in data) {
                     // noinspection JSUnfilteredForInLoop
-                    clone[key] = Transport._processMultiMixedJSONDeep(data[key], binaryReferencePackets);
+                    clone[key] = Transport._processMultiMixedJSONDeep(data[key],binaries);
                 }
                 return clone;
             }

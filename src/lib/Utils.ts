@@ -7,6 +7,11 @@ Copyright(c) Ing. Luca Gian Scaringella
 export type Writable<T> = { -readonly [P in keyof T]: T[P] };
 export const RESOLVED_PROMISE = Object.freeze(Promise.resolve()) as Promise<void>;
 
+export const MAX_UINT_32 = 4294967295;
+export const MAX_SUPPORTED_ARRAY_BUFFER_SIZE = MAX_UINT_32 - 1;
+
+export type SendFunction= (msg: ArrayBuffer | string, binary?: boolean, compressed?: boolean) => void;
+
 /**
  * Guesses the string max byte size in UTF-8.
  * @param str

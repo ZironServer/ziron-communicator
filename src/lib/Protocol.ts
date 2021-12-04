@@ -5,6 +5,9 @@ Copyright(c) Ing. Luca Gian Scaringella
  */
 
 import {DataType} from "./DataType";
+import {MAX_UINT_32} from "./Utils";
+
+export const NEXT_BINARIES_PACKET_TOKEN = MAX_UINT_32;
 
 export const enum PacketType {
     Bundle,
@@ -12,7 +15,7 @@ export const enum PacketType {
     Invoke,
     InvokeDataResp,
     InvokeErrResp,
-    BinaryReference,
+    BinaryContent,
     StreamAccept,
     StreamChunk,
     StreamEnd,
@@ -26,9 +29,11 @@ export const enum PacketType {
  * 0: PacketType
  * 1: Receiver
  * 2: DataType
- * 3: Data
+ * 3?: Data
+ * 4?: Data-Meta-information
+ * (Only provided when data is also provided (Could be a binaries' packet id))
  */
-export type TransmitPacket = [PacketType.Transmit,string,DataType,any];
+export type TransmitPacket = [PacketType.Transmit,string,DataType,any,any];
 
 /**
  * Indexes:
@@ -36,18 +41,22 @@ export type TransmitPacket = [PacketType.Transmit,string,DataType,any];
  * 1: Procedure
  * 2: CallId
  * 3: DataType
- * 4: Data
+ * 4?: Data
+ * 5?: Data-Meta-information
+ * (Only provided when data is also provided (Could be a binaries' packet id))
  */
-export type InvokePacket = [PacketType.Invoke,string,number,DataType,any];
+export type InvokePacket = [PacketType.Invoke,string,number,DataType,any,any];
 
 /**
  * Indexes:
  * 0: PacketType
  * 1: CallId
  * 2: DataType
- * 3: Data
+ * 3?: Data
+ * 4?: Data-Meta-information
+ * (Only provided when data is also provided (Could be a binaries' packet id))
  */
-export type InvokeDataRespPacket = [PacketType.InvokeDataResp,number,DataType,any];
+export type InvokeDataRespPacket = [PacketType.InvokeDataResp,number,DataType,any,any];
 
 /**
  * Indexes:
@@ -70,9 +79,11 @@ export type StreamAcceptPacket = [PacketType.StreamAccept,number,number];
  * 0: PacketType
  * 1: StreamId
  * 2: DataType
- * 3: Data
+ * 3?: Data
+ * 4?: Data-Meta-information
+ * (Only provided when data is also provided (Could be a binaries' packet id))
  */
-export type StreamChunkPacket = [PacketType.StreamChunk,number,DataType,any];
+export type StreamChunkPacket = [PacketType.StreamChunk,number,DataType,any,any];
 
 /**
  * Indexes:
@@ -80,8 +91,10 @@ export type StreamChunkPacket = [PacketType.StreamChunk,number,DataType,any];
  * 1: StreamId
  * 2?: DataType
  * 3?: Data
+ * 4?: Data-Meta-information
+ * (Only provided when data is also provided (Could be a binaries' packet id))
  */
-export type StreamEndPacket = [PacketType.StreamEnd,number,DataType?,any?];
+export type StreamEndPacket = [PacketType.StreamEnd,number,DataType?,any?,any?];
 
 /**
  * Indexes:
