@@ -4,9 +4,9 @@ GitHub: LucaCode
 Copyright(c) Ing. Luca Gian Scaringella
  */
 
-import {PacketType} from "./Protocol";
+import {NEXT_BINARIES_PACKET_TOKEN, PacketType} from "./Protocol";
 import {PreparedPackage} from "./PreparedPackage";
-import {guessStringSize} from "./Utils";
+import {guessStringSize, SendFunction} from "./Utils";
 import {InsufficientBufferSizeError} from "./Errors";
 
 /**
@@ -17,7 +17,7 @@ import {InsufficientBufferSizeError} from "./Errors";
 export default class PackageBuffer {
 
     constructor(
-        public send: (msg: string | ArrayBuffer) => void,
+        public send: SendFunction,
         public isOpen: () => boolean = () => true
     ) {}
 
@@ -37,10 +37,12 @@ export default class PackageBuffer {
     public static stringSizeDeterminer: (str: string) => number = guessStringSize;
     public static maxBufferChunkLength: number = 200;
     public static limitBatchStringPacketLength: number = 310000;
+    public static limitBatchBinaryContentSize: number = 3145728;
 
     public maxBufferSize: number = PackageBuffer.maxBufferSize;
     public maxBufferChunkLength: number = PackageBuffer.maxBufferChunkLength;
     public limitBatchStringPacketLength: number = PackageBuffer.limitBatchStringPacketLength;
+    public limitBatchBinaryContentSize: number = PackageBuffer.limitBatchBinaryContentSize;
 
     /**
      * @description
@@ -203,8 +205,9 @@ export default class PackageBuffer {
     }
 
     private _sendBufferChunk(packages: PreparedPackage[]) {
-        const compressPackage = this._compressPreparedPackages(packages), listLength = packages.length;
-        for(let i = 0; i < compressPackage.length; i++) this.send(compressPackage[i]);
+        const compressPackage = this._compressPreparedPackages(packages),
+            listLength = packages.length, compressHint = packages.length > 1;
+        for(let i = 0; i < compressPackage.length; i++) this.send(compressPackage[i],compressHint);
         for(let i = 0; i < listLength; i++) if(packages[i]._afterSend) packages[i]._afterSend!();
     }
 
@@ -218,31 +221,69 @@ export default class PackageBuffer {
     private _compressPreparedPackages(preparedPackages: PreparedPackage[]): (string|ArrayBuffer)[] {
         if(preparedPackages.length < 1) return [];
         const compressedPackets: (string|ArrayBuffer)[] = [], len = preparedPackages.length;
-        let tmpStringPacket: string = "",tmpPacketsBundle: (string|ArrayBuffer)[] = [],
-            tmpPackets: PreparedPackage, bundleHasBinary: boolean = false;
-        tmpPacketsBundle.length = 1;
+        let tmpStringPacket: string = "",tmpBinaryPackets: ArrayBuffer[] = [],
+            tmpPreparedPackage: PreparedPackage, bundleHasBinary: boolean = false;
 
         for(let i = 0; i < len; i++) {
-            tmpPackets = preparedPackages[i];
-            if((bundleHasBinary && tmpPackets.length === 1) ||
+            tmpPreparedPackage = preparedPackages[i];
+            if((bundleHasBinary && tmpPreparedPackage.length === 1) ||
                 (tmpStringPacket.length > 0 &&
-                    (tmpStringPacket.length + tmpPackets[0].length) > this.limitBatchStringPacketLength))
+                    (tmpStringPacket.length + tmpPreparedPackage[0].length) > this.limitBatchStringPacketLength))
             {
-                tmpPacketsBundle[0] = PacketType.Bundle +
-                    ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']';
-                compressedPackets.push(...tmpPacketsBundle);
-                tmpPacketsBundle = [];
-                tmpPacketsBundle.length = 1;
+                compressedPackets.push(PacketType.Bundle +
+                    ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']');
+                compressedPackets.push(...this._compressBinaryContentPackets(tmpBinaryPackets));
+                tmpBinaryPackets = [];
                 tmpStringPacket = '';
                 bundleHasBinary = false;
             }
-            tmpStringPacket += ('[' + tmpPackets[0] + '],');
-            tmpPacketsBundle.push(...tmpPackets.slice(1));
-            bundleHasBinary = bundleHasBinary || tmpPackets.length > 1;
+            tmpStringPacket += ('[' + tmpPreparedPackage[0] + '],');
+            if(tmpPreparedPackage.length > 1) {
+                tmpBinaryPackets.push(tmpPreparedPackage[1]!);
+                bundleHasBinary = true;
+            }
         }
-        tmpPacketsBundle[0] = PacketType.Bundle +
-            ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']';
-        compressedPackets.push(...tmpPacketsBundle);
+        compressedPackets.push(PacketType.Bundle +
+            ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']');
+        compressedPackets.push(...this._compressBinaryContentPackets(tmpBinaryPackets));
         return compressedPackets;
+    }
+
+    private _compressBinaryContentPackets(binaries: ArrayBuffer[]): ArrayBuffer[] {
+        if(binaries.length === 0) return [];
+        const packets: ArrayBuffer[] = [], len = binaries.length;
+        let size = 1, packetsBatch: ArrayBuffer[] = [], binary: ArrayBuffer;
+        for(let i = 0; i < len; i++) {
+            binary = binaries[i];
+            size += binary.byteLength - 1;
+            packetsBatch.push(binary);
+            if(size > this.limitBatchBinaryContentSize && packetsBatch.length > 0) {
+                packets.push(PackageBuffer._batchBinaryContentPackets(packetsBatch));
+                size = 1;
+                packetsBatch = [];
+            }
+            else size += 4;
+        }
+        if(packetsBatch.length > 0) packets.push(PackageBuffer._batchBinaryContentPackets(packetsBatch));
+        return packets;
+    }
+
+    private static _batchBinaryContentPackets(binaries: ArrayBuffer[]): ArrayBuffer {
+        if(binaries.length === 0) throw new Error("Can not batch empty binary content packets array.");
+        const length = binaries.length;
+        let size = 1 + (length * 4 - 4), i: number, bi = 1;
+        for(i = 0; i < length; i++) size += binaries[i].byteLength - 1;
+        const dataView = new DataView(new ArrayBuffer(size));
+        dataView.setInt8(0,PacketType.BinaryContent);
+        const uint8PacketView = new Uint8Array(dataView.buffer);
+        for(i = 0; i < length; i++) {
+            uint8PacketView.set(new Uint8Array(binaries[i],1),bi);
+            bi += binaries[i].byteLength - 1;
+            if(i + 1 < length) {
+                dataView.setUint32(bi,NEXT_BINARIES_PACKET_TOKEN);
+                bi += 4;
+            }
+        }
+        return dataView.buffer;
     }
 }
