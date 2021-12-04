@@ -22,20 +22,22 @@ import {
     BadConnectionError,
     BadConnectionType,
     BackError,
-    InsufficientBufferSizeError
+    InsufficientBufferSizeError, MaxSupportedArrayBufferSizeExceededError
 } from "./lib/Errors";
 import {dehydrateError, hydrateError} from "./lib/ErrorUtils";
 import StreamCloseError from "./lib/streams/StreamCloseError";
 import { PreparedPackage } from "./lib/PreparedPackage";
 import PackageBuffer from "./lib/PackageBuffer";
 import GroupTransport from "./lib/GroupTransport";
-import {escapeJSONString} from "./lib/Utils";
+import {escapeJSONString, MAX_SUPPORTED_ARRAY_BUFFER_SIZE} from "./lib/Utils";
 
 export {
     Transport,
     GroupTransport,
     PackageBuffer,
     InsufficientBufferSizeError,
+    MaxSupportedArrayBufferSizeExceededError,
+    MAX_SUPPORTED_ARRAY_BUFFER_SIZE,
     JSONString,
     WriteStream,
     ReadStream,
