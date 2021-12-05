@@ -54,14 +54,47 @@ const PONG = 65;
 const PONG_BINARY = new Uint8Array([PONG]);
 
 export interface TransportOptions extends PackageBufferOptions {
+    /**
+     * @description
+     * Defines the default timeout in milliseconds for
+     * receiving the response of an invoke.
+     * Notice that an individual ack timeout can be specified for
+     * an invoke that overrides this option value.
+     * @default 10000
+     */
     ackTimeout: number;
-    binaryResolveTimeout: number;
-    streamsPerPacketLimit: number;
+    /**
+     * @description
+     * Defines a timeout in milliseconds for receiving
+     * the referenced binary content packet of a text packet.
+     * @default 10000
+     */
+    binaryContentPacketTimeout: number;
+    /**
+     * @description
+     * This option defines how many
+     * streams are allowed in a package.
+     * @default 20
+     */
+    streamsPerPackageLimit: number;
+    /**
+     * @description
+     * This option enables or disables streams.
+     * @default true
+     */
     streamsEnabled: boolean;
+    /**
+     * @description
+     * This option species if chunks
+     * of streams can contain streams.
+     * @default false
+     */
     chunksCanContainStreams: boolean;
     /**
+     * @description
      * The read stream class that is used.
      * Must inherit from the Ziron ReadStream.
+     * @default ReadStream
      */
     readStream: typeof ReadStream
 }
@@ -71,15 +104,11 @@ export default class Transport {
     public static readonly DEFAULT_OPTIONS: Readonly<TransportOptions> = {
         readStream: ReadStream,
         ackTimeout: 10000,
-        binaryResolveTimeout: 10000,
-        streamsPerPacketLimit: 20,
+        binaryContentPacketTimeout: 10000,
+        streamsPerPackageLimit: 20,
         streamsEnabled: true,
         chunksCanContainStreams: false,
-        maxBufferSize: Number.POSITIVE_INFINITY,
-        maxBufferChunkLength: 200,
-        limitBatchStringLength: 310000,
-        limitBatchBinarySize: 3145728,
-        stringSizeDeterminer: guessStringSize,
+        ...PackageBuffer.DEFAULT_OPTIONS
     }
 
     public static buildOptions(options: Partial<TransportOptions>): TransportOptions {
@@ -545,7 +574,7 @@ export default class Transport {
             timeout: setTimeout(() => {
                 delete this._binaryContentResolver[binariesPacketId];
                 callback(new TimeoutError(`Binaries resolver: ${binariesPacketId} not resolved in time.`,TimeoutType.BinaryResolve));
-            }, this.options.binaryResolveTimeout)
+            }, this.options.binaryContentPacketTimeout)
         };
     }
 
@@ -578,7 +607,7 @@ export default class Transport {
                     obj[key] = meta.binaries[value['_b']];
                 }
                 else if(options.parseStreams && typeof value['_s'] === 'number'){
-                    if(meta.streamCount >= this.options.streamsPerPacketLimit) throw new Error('Max stream limit reached.')
+                    if(meta.streamCount >= this.options.streamsPerPackageLimit) throw new Error('Max stream limit reached.')
                     meta.streamCount++;
                     obj[key] = new this.options.readStream(value['_s'],this);
                 }

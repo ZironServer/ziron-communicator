@@ -22,6 +22,7 @@ export interface PackageBufferOptions {
      * UTF-8 string encoded byte size of string packets.
      * By default, guessStringSize is used for performance reasons but
      * can be replaced with a function that determines the byte size specific.
+     * @default Number.POSITIVE_INFINITY
      */
     maxBufferSize: number;
     /**
@@ -30,6 +31,7 @@ export interface PackageBufferOptions {
      * When flushing a quite full buffer, the packages will be grouped in chunks.
      * The maximum count of packages in a chunk is specified with this option.
      * For each chunk, a batch will be created and sent.
+     * @default 200
      */
     maxBufferChunkLength: number;
     /**
@@ -37,13 +39,15 @@ export interface PackageBufferOptions {
      * The limit length of a string (text packets with JSON content) batch.
      * When the buffer creates a text packet batch,
      * it stops adding string packets when the limit gets exceeded.
+     * @default 310000
      */
     limitBatchStringLength: number;
     /**
      * @description
-     * The limit size of a binary batch.
+     * The limit size of a binary batch (in bytes).
      * When the buffer creates a binary batch,
      * it stops adding packets when the limit gets exceeded.
+     * @default 3145728 (3 MB)
      */
     limitBatchBinarySize: number;
     /**
@@ -51,6 +55,7 @@ export interface PackageBufferOptions {
      * Used to find out the UTF-8 byte size of a string to detect if the buffer space is enough.
      * Defaults to guessStringSize for performance reasons but can be
      * replaced with a function that determines the byte size specific.
+     * @default guessStringSize
      */
     stringSizeDeterminer: (str: string) => number;
 }
