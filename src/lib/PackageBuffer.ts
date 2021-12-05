@@ -6,8 +6,54 @@ Copyright(c) Ing. Luca Gian Scaringella
 
 import {NEXT_BINARIES_PACKET_TOKEN, PacketType} from "./Protocol";
 import {PreparedPackage} from "./PreparedPackage";
-import {guessStringSize, SendFunction} from "./Utils";
+import {guessStringSize, loadDefaults, SendFunction} from "./Utils";
 import {InsufficientBufferSizeError} from "./Errors";
+
+export interface PackageBufferOptions {
+    /**
+     * @description
+     * The maximum buffer size in bytes.
+     * The maximum size will limit the available space to buffer packages in the buffer.
+     * When a new package would exceed the buffer size,
+     * the buffer will be flushed automatically.
+     * When it is not possible to flush the buffer duo to a not open state,
+     * an InsufficientBufferSizeError will be thrown.
+     * Notice that the stringSizeDeterminer is used to determine the
+     * UTF-8 string encoded byte size of string packets.
+     * By default, guessStringSize is used for performance reasons but
+     * can be replaced with a function that determines the byte size specific.
+     */
+    maxBufferSize: number;
+    /**
+     * @description
+     * The maximum buffer chunk length.
+     * When flushing a quite full buffer, the packages will be grouped in chunks.
+     * The maximum count of packages in a chunk is specified with this option.
+     * For each chunk, a batch will be created and sent.
+     */
+    maxBufferChunkLength: number;
+    /**
+     * @description
+     * The limit length of a string (text packets with JSON content) batch.
+     * When the buffer creates a text packet batch,
+     * it stops adding string packets when the limit gets exceeded.
+     */
+    limitBatchStringLength: number;
+    /**
+     * @description
+     * The limit size of a binary batch.
+     * When the buffer creates a binary batch,
+     * it stops adding packets when the limit gets exceeded.
+     */
+    limitBatchBinarySize: number;
+    /**
+     * @description
+     * Used to find out the UTF-8 byte size of a string to detect if the buffer space is enough.
+     * Defaults to guessStringSize for performance reasons but can be
+     * replaced with a function that determines the byte size specific.
+     */
+    stringSizeDeterminer: (str: string) => number;
+}
 
 /**
  * Class for buffering packages and send them batched together.
@@ -18,7 +64,11 @@ export default class PackageBuffer {
 
     constructor(
         public send: SendFunction,
-        public isOpen: () => boolean = () => true
+        public isOpen: () => boolean = () => true,
+        /**
+         * Notice that the provided options will not be cloned to save memory and performance.
+         */
+        public options: PackageBufferOptions = {...PackageBuffer.DEFAULT_OPTIONS}
     ) {}
 
     private _buffer: PreparedPackage[] = [];
@@ -28,21 +78,17 @@ export default class PackageBuffer {
     private _bufferTimeoutTicker: NodeJS.Timeout | undefined;
     private _bufferTimeoutTimestamp: number | undefined;
 
-    public static maxBufferSize: number = Number.POSITIVE_INFINITY;
-    /**
-     * Used to find out the UTF-8 byte size of a string to detect if the buffer space is enough.
-     * Defaults to guessStringSize for performance reasons but can be
-     * replaced with a function that determines the byte size specific.
-     */
-    public static stringSizeDeterminer: (str: string) => number = guessStringSize;
-    public static maxBufferChunkLength: number = 200;
-    public static limitBatchStringPacketLength: number = 310000;
-    public static limitBatchBinaryContentSize: number = 3145728;
+    public static readonly DEFAULT_OPTIONS: Readonly<PackageBufferOptions> = {
+        maxBufferSize: Number.POSITIVE_INFINITY,
+        maxBufferChunkLength: 200,
+        limitBatchStringLength: 310000,
+        limitBatchBinarySize: 3145728,
+        stringSizeDeterminer: guessStringSize
+    }
 
-    public maxBufferSize: number = PackageBuffer.maxBufferSize;
-    public maxBufferChunkLength: number = PackageBuffer.maxBufferChunkLength;
-    public limitBatchStringPacketLength: number = PackageBuffer.limitBatchStringPacketLength;
-    public limitBatchBinaryContentSize: number = PackageBuffer.limitBatchBinaryContentSize;
+    public static buildOptions(options: Partial<PackageBufferOptions>): PackageBufferOptions {
+        return loadDefaults(options,PackageBuffer.DEFAULT_OPTIONS);
+    }
 
     /**
      * @description
@@ -80,8 +126,8 @@ export default class PackageBuffer {
      * @param pack
      * @private
      */
-    private static _addPreparedPackageSize(pack: PreparedPackage) {
-        pack._size = PackageBuffer.stringSizeDeterminer(pack[0]);
+    private _addPreparedPackageSize(pack: PreparedPackage) {
+        pack._size = this.options.stringSizeDeterminer(pack[0]);
         for(let i = pack.length - 1; i > 0; i--)
             pack._size += (pack[i] as ArrayBuffer).byteLength;
     }
@@ -105,8 +151,8 @@ export default class PackageBuffer {
      * @param batch
      */
     public add(preparedPackage: PreparedPackage, batch?: number | true) {
-        PackageBuffer._addPreparedPackageSize(preparedPackage);
-        if(this._bufferSize + preparedPackage._size! > this.maxBufferSize) {
+        this._addPreparedPackageSize(preparedPackage);
+        if(this._bufferSize + preparedPackage._size! > this.options.maxBufferSize) {
             //would max out buffer..
             if(this.isOpen()) {
                 //Flush with new package directly.
@@ -196,33 +242,35 @@ export default class PackageBuffer {
         const packages = this._buffer;
         this._buffer = [];
         this._bufferSize = 0;
-        if(packages.length <= this.maxBufferChunkLength) this._sendBufferChunk(packages);
+        if(packages.length <= this.options.maxBufferChunkLength) this._sendBufferChunk(packages);
         else {
-            const chunkLength = this.maxBufferChunkLength;
+            const chunkLength = this.options.maxBufferChunkLength;
             for (let i = 0,len = packages.length; i < len; i += chunkLength)
                 this._sendBufferChunk(packages.slice(i, i + chunkLength))
         }
     }
 
     private _sendBufferChunk(packages: PreparedPackage[]) {
-        const compressedPackage = this._compressPreparedPackages(packages),
+        const batchPackage = this._batchCompress(packages),
             listLength = packages.length,
-            compressed = packages.length > 1 && compressedPackage.length < packages.length;
-        for(let i = 0; i < compressedPackage.length; i++) this.send(compressedPackage[i],
-            typeof compressedPackage[i] === 'object',compressed);
+            batch = batchPackage.length < packages.length;
+        for(let i = 0; i < batchPackage.length; i++) this.send(batchPackage[i],
+            typeof batchPackage[i] === 'object',batch);
         for(let i = 0; i < listLength; i++) if(packages[i]._afterSend) packages[i]._afterSend!();
     }
 
     // noinspection JSMethodCanBeStatic
     /**
      * @description
-     * This compression will keep the order of packages.
+     * The created batch will keep the order of packages.
      * @param preparedPackages
      * @private
      */
-    private _compressPreparedPackages(preparedPackages: PreparedPackage[]): (string|ArrayBuffer)[] {
+    private _batchCompress(preparedPackages: PreparedPackage[]): (string|ArrayBuffer)[] {
         if(preparedPackages.length < 1) return [];
-        const compressedPackets: (string|ArrayBuffer)[] = [], len = preparedPackages.length;
+        else if(preparedPackages.length === 1) return preparedPackages[0] as (string|ArrayBuffer)[];
+
+        const batchPackets: (string|ArrayBuffer)[] = [], len = preparedPackages.length;
         let tmpStringPacket: string = "",tmpBinaryPackets: ArrayBuffer[] = [],
             tmpPreparedPackage: PreparedPackage, bundleHasBinary: boolean = false;
 
@@ -230,11 +278,11 @@ export default class PackageBuffer {
             tmpPreparedPackage = preparedPackages[i];
             if((bundleHasBinary && tmpPreparedPackage.length === 1) ||
                 (tmpStringPacket.length > 0 &&
-                    (tmpStringPacket.length + tmpPreparedPackage[0].length) > this.limitBatchStringPacketLength))
+                    (tmpStringPacket.length + tmpPreparedPackage[0].length) > this.options.limitBatchStringLength))
             {
-                compressedPackets.push(PacketType.Bundle +
+                batchPackets.push(PacketType.Bundle +
                     ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']');
-                compressedPackets.push(...this._compressBinaryContentPackets(tmpBinaryPackets));
+                batchPackets.push(...this._createBinaryContentBatches(tmpBinaryPackets));
                 tmpBinaryPackets = [];
                 tmpStringPacket = '';
                 bundleHasBinary = false;
@@ -245,13 +293,13 @@ export default class PackageBuffer {
                 bundleHasBinary = true;
             }
         }
-        compressedPackets.push(PacketType.Bundle +
+        batchPackets.push(PacketType.Bundle +
             ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']');
-        compressedPackets.push(...this._compressBinaryContentPackets(tmpBinaryPackets));
-        return compressedPackets;
+        batchPackets.push(...this._createBinaryContentBatches(tmpBinaryPackets));
+        return batchPackets;
     }
 
-    private _compressBinaryContentPackets(binaries: ArrayBuffer[]): ArrayBuffer[] {
+    private _createBinaryContentBatches(binaries: ArrayBuffer[]): ArrayBuffer[] {
         if(binaries.length === 0) return [];
         const packets: ArrayBuffer[] = [], len = binaries.length;
         let size = 1, packetsBatch: ArrayBuffer[] = [], binary: ArrayBuffer;
@@ -259,18 +307,18 @@ export default class PackageBuffer {
             binary = binaries[i];
             size += binary.byteLength - 1;
             packetsBatch.push(binary);
-            if(size > this.limitBatchBinaryContentSize && packetsBatch.length > 0) {
-                packets.push(PackageBuffer._batchBinaryContentPackets(packetsBatch));
+            if(size > this.options.limitBatchBinarySize && packetsBatch.length > 0) {
+                packets.push(PackageBuffer._createBinaryContentBatch(packetsBatch));
                 size = 1;
                 packetsBatch = [];
             }
             else size += 4;
         }
-        if(packetsBatch.length > 0) packets.push(PackageBuffer._batchBinaryContentPackets(packetsBatch));
+        if(packetsBatch.length > 0) packets.push(PackageBuffer._createBinaryContentBatch(packetsBatch));
         return packets;
     }
 
-    private static _batchBinaryContentPackets(binaries: ArrayBuffer[]): ArrayBuffer {
+    private static _createBinaryContentBatch(binaries: ArrayBuffer[]): ArrayBuffer {
         const length = binaries.length;
         if(length < 2) {
             if(length === 1) return binaries[0];

@@ -9,7 +9,7 @@ import WriteStream from "./lib/streams/WriteStream";
 import Transport, {
     TransmitListener,
     InvokeListener,
-    ComplexTypesOption
+    ComplexTypesOption, TransportOptions
 } from "./lib/Transport";
 import ReadStream, {ChunkMiddleware} from "./lib/streams/ReadStream";
 import {StreamErrorCloseCode} from "./lib/streams/StreamErrorCloseCode";
@@ -27,14 +27,17 @@ import {
 import {dehydrateError, hydrateError} from "./lib/ErrorUtils";
 import StreamCloseError from "./lib/streams/StreamCloseError";
 import { PreparedPackage } from "./lib/PreparedPackage";
-import PackageBuffer from "./lib/PackageBuffer";
-import GroupTransport from "./lib/GroupTransport";
+import PackageBuffer, {PackageBufferOptions} from "./lib/PackageBuffer";
+import GroupTransport, {GroupTransportOptions} from "./lib/GroupTransport";
 import {escapeJSONString, MAX_SUPPORTED_ARRAY_BUFFER_SIZE} from "./lib/Utils";
 
 export {
     Transport,
+    TransportOptions,
     GroupTransport,
+    GroupTransportOptions,
     PackageBuffer,
+    PackageBufferOptions,
     InsufficientBufferSizeError,
     MaxSupportedArrayBufferSizeExceededError,
     MAX_SUPPORTED_ARRAY_BUFFER_SIZE,

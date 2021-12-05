@@ -12,7 +12,7 @@ import ReadStream from "./streams/ReadStream";
 import WriteStream from "./streams/WriteStream";
 import {StreamErrorCloseCode} from "./streams/StreamErrorCloseCode";
 import {
-    escapePlaceholderSequence,
+    escapePlaceholderSequence, guessStringSize, loadDefaults,
     MAX_SUPPORTED_ARRAY_BUFFER_SIZE,
     RESOLVED_PROMISE,
     SendFunction, unescapePlaceholderSequence,
@@ -27,7 +27,7 @@ import {
     TimeoutType
 } from "./Errors";
 import {PreparedInvokePackage, PreparedPackage} from "./PreparedPackage";
-import PackageBuffer from "./PackageBuffer";
+import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
 
 export interface ComplexTypesOption {
     /**
@@ -53,23 +53,40 @@ const PING_BINARY = new Uint8Array([PING]);
 const PONG = 65;
 const PONG_BINARY = new Uint8Array([PONG]);
 
-export default class Transport {
-
+export interface TransportOptions extends PackageBufferOptions {
+    ackTimeout: number;
+    binaryResolveTimeout: number;
+    streamsPerPacketLimit: number;
+    streamsEnabled: boolean;
+    chunksCanContainStreams: boolean;
     /**
      * The read stream class that is used.
      * Must inherit from the Ziron ReadStream.
      */
-    public static readStream: typeof ReadStream = ReadStream;
+    readStream: typeof ReadStream
+}
+
+export default class Transport {
+
+    public static readonly DEFAULT_OPTIONS: Readonly<TransportOptions> = {
+        readStream: ReadStream,
+        ackTimeout: 10000,
+        binaryResolveTimeout: 10000,
+        streamsPerPacketLimit: 20,
+        streamsEnabled: true,
+        chunksCanContainStreams: false,
+        maxBufferSize: Number.POSITIVE_INFINITY,
+        maxBufferChunkLength: 200,
+        limitBatchStringLength: 310000,
+        limitBatchBinarySize: 3145728,
+        stringSizeDeterminer: guessStringSize,
+    }
+
+    public static buildOptions(options: Partial<TransportOptions>): TransportOptions {
+        return loadDefaults(options,Transport.DEFAULT_OPTIONS);
+    }
 
     public readonly buffer: PackageBuffer;
-
-    public ackTimeout?: number;
-
-    public static ackTimeout: number = 10000;
-    public static binaryResolveTimeout: number = 10000;
-    public static packetStreamLimit: number = 20;
-    public static streamsEnabled: boolean = true;
-    public static chunksCanContainStreams: boolean = false;
 
     public onInvalidMessage: (err: Error) => void;
     /**
@@ -94,23 +111,30 @@ export default class Transport {
 
     public readonly badConnectionTimestamp: number = -1;
 
-    constructor(connector: {
-        onInvalidMessage?: (err: Error) => void;
-        onListenerError?: (err: Error) => void;
-        onTransmit?: TransmitListener;
-        onInvoke?: InvokeListener;
-        onPing?: () => void;
-        onPong?: () => void;
-        send?: (msg: string | ArrayBuffer) => void;
+    constructor(
+        connector: {
+            onInvalidMessage?: (err: Error) => void;
+            onListenerError?: (err: Error) => void;
+            onTransmit?: TransmitListener;
+            onInvoke?: InvokeListener;
+            onPing?: () => void;
+            onPong?: () => void;
+            send?: (msg: string | ArrayBuffer) => void;
+            /**
+             * @description
+             * The write streams will pause when the backpressure is
+             * not low and are waiting for low pressure.
+             * When this method is used, backpressure draining
+             * must be emitted with the emitBackpressureDrain method.
+             */
+            hasLowBackpressure?: () => boolean;
+        } = {},
         /**
-         * @description
-         * The write streams will pause when the backpressure is
-         * not low and are waiting for low pressure.
-         * When this method is used, backpressure draining
-         * must be emitted with the emitBackpressureDrain method.
+         * Notice that the provided options will not be cloned to save memory and performance.
          */
-        hasLowBackpressure?: () => boolean;
-    } = {}, connected: boolean = true) {
+        public options: TransportOptions = {...Transport.DEFAULT_OPTIONS},
+        connected: boolean = true)
+    {
         this.onInvalidMessage = connector.onInvalidMessage || (() => {});
         this.onListenerError = connector.onListenerError || (() => {});
         this.onTransmit = connector.onTransmit || (() => {});
@@ -120,7 +144,7 @@ export default class Transport {
         this._send = connector.send || (() => {});
         this.hasLowBackpressure = connector.hasLowBackpressure || (() => true);
         this.open = connected;
-        this.buffer = new PackageBuffer(this._send,() => this.open);
+        this.buffer = new PackageBuffer(this._send,() => this.open,options);
     }
 
     /**
@@ -386,7 +410,7 @@ export default class Transport {
     private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any, binariesPacketId?: number) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
-            if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
+            if(containsStreams(dataType) && !this.options.chunksCanContainStreams)
                 throw new Error('Streams in chunks are not allowed.');
             stream._pushChunk(this._processData(dataType,data,binariesPacketId),dataType);
         }
@@ -396,7 +420,7 @@ export default class Transport {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
             if(typeof dataType === 'number') {
-                if(containsStreams(dataType) && !Transport.chunksCanContainStreams)
+                if(containsStreams(dataType) && !this.options.chunksCanContainStreams)
                     throw new Error('Streams in chunks are not allowed.');
                 stream._pushChunk(this._processData(dataType,data,binariesPacketId),dataType);
             }
@@ -450,7 +474,7 @@ export default class Transport {
             this._send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
-        else if(data instanceof WriteStream && Transport.streamsEnabled){
+        else if(data instanceof WriteStream && this.options.streamsEnabled){
             const streamId = this._getNewStreamId(data.binary);
             this._send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.Stream + ',' + streamId);
@@ -497,7 +521,7 @@ export default class Transport {
             })
         } else if (isMixedJSONDataType(type)) {
             const resolveOptions = {
-                parseStreams: Transport.streamsEnabled &&
+                parseStreams: this.options.streamsEnabled &&
                     (type === DataType.JSONWithStreams || type === DataType.JSONWithStreamsAndBinaries),
                 parseBinaries: type === DataType.JSONWithBinaries || type === DataType.JSONWithStreamsAndBinaries
             };
@@ -507,9 +531,9 @@ export default class Transport {
                 })
             })
             else return Promise.resolve(this._resolveMixedJSONDeep(data,resolveOptions));
-        } else if(type === DataType.Stream && Transport.streamsEnabled) {
+        } else if(type === DataType.Stream && this.options.streamsEnabled) {
             if(typeof data !== 'number') throw new Error('Invalid stream id.');
-            return Promise.resolve(new Transport.readStream(data,this));
+            return Promise.resolve(new this.options.readStream(data,this));
         }
         else throw new Error('Invalid data type.');
     }
@@ -521,7 +545,7 @@ export default class Transport {
             timeout: setTimeout(() => {
                 delete this._binaryContentResolver[binariesPacketId];
                 callback(new TimeoutError(`Binaries resolver: ${binariesPacketId} not resolved in time.`,TimeoutType.BinaryResolve));
-            }, Transport.binaryResolveTimeout)
+            }, this.options.binaryResolveTimeout)
         };
     }
 
@@ -554,9 +578,9 @@ export default class Transport {
                     obj[key] = meta.binaries[value['_b']];
                 }
                 else if(options.parseStreams && typeof value['_s'] === 'number'){
-                    if(meta.streamCount >= Transport.packetStreamLimit) throw new Error('Max stream limit reached.')
+                    if(meta.streamCount >= this.options.streamsPerPacketLimit) throw new Error('Max stream limit reached.')
                     meta.streamCount++;
-                    obj[key] = new Transport.readStream(value['_s'],this);
+                    obj[key] = new this.options.readStream(value['_s'],this);
                 }
                 else {
                     const clone = {};
@@ -612,7 +636,7 @@ export default class Transport {
         if(typeof data === 'object' && data){
             if(data instanceof ArrayBuffer) return {_b: binaries.push(data) - 1};
             else if(data instanceof WriteStream){
-                if(Transport.streamsEnabled){
+                if(this.options.streamsEnabled){
                     const streamId = this._getNewStreamId(data.binary);
                     data._init(this,streamId);
                     streams.push(data);
@@ -718,7 +742,7 @@ export default class Transport {
             return [PacketType.Transmit + ',"' + receiver + '",' +
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
-        else if(data instanceof WriteStream && Transport.streamsEnabled){
+        else if(data instanceof WriteStream && this.options.streamsEnabled){
             const streamId = this._getNewStreamId(data.binary);
             const packet: PreparedPackage = [PacketType.Transmit + ',"' + receiver + '",' +
                 DataType.Stream + ',' + streamId];
@@ -783,7 +807,7 @@ export default class Transport {
                     this._invokeResponsePromises[callId].timeout = setTimeout(() => {
                         delete this._invokeResponsePromises[callId];
                         reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
-                    }, ackTimeout || this.ackTimeout || Transport.ackTimeout);
+                    }, ackTimeout || this.options.ackTimeout);
                 }
             });
             preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
@@ -802,11 +826,11 @@ export default class Transport {
                         this._invokeResponsePromises[callId].timeout = setTimeout(() => {
                             delete this._invokeResponsePromises[callId];
                             reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
-                        }, ackTimeout || this.ackTimeout || Transport.ackTimeout);
+                        }, ackTimeout || this.options.ackTimeout);
                 }
             });
 
-            if(data instanceof WriteStream && Transport.streamsEnabled){
+            if(data instanceof WriteStream && this.options.streamsEnabled){
                 const sent = new Promise(res => preparedPackage._afterSend = () => {
                     setResponse!();
                     res();
@@ -940,7 +964,7 @@ export default class Transport {
             this._send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
-        else if(Transport.chunksCanContainStreams && data instanceof WriteStream){
+        else if(this.options.chunksCanContainStreams && data instanceof WriteStream){
             const streamId = this._getNewStreamId(data.binary);
             this._send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.Stream + ',' + streamId);

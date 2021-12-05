@@ -4,10 +4,12 @@ GitHub: LucaCode
 Copyright(c) Ing. Luca Gian Scaringella
  */
 
-import PackageBuffer from "./PackageBuffer";
+import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
 import {PreparedPackage} from "./PreparedPackage";
 import Transport, {ComplexTypesOption} from "./Transport";
-import {SendFunction} from "./Utils";
+import {loadDefaults, SendFunction} from "./Utils";
+
+export interface GroupTransportOptions extends PackageBufferOptions {}
 
 /**
  * @description
@@ -29,12 +31,23 @@ export default class GroupTransport {
      * Should return a boolean that indicates if the underlying source is completely connected.
      * When the underlying source does not have a disconnected state,
      * the function can always return true.
+     * @param options
      */
     constructor(
         public readonly send: SendFunction,
-        public readonly isConnected: () => boolean = () => true
+        public readonly isConnected: () => boolean = () => true,
+        /**
+         * Notice that the provided options will not be cloned to save memory and performance.
+         */
+        public options: GroupTransportOptions = {...GroupTransport.DEFAULT_OPTIONS}
     ) {
-        this.buffer = new PackageBuffer(this.send,isConnected);
+        this.buffer = new PackageBuffer(this.send,isConnected,options);
+    }
+
+    public static readonly DEFAULT_OPTIONS: Readonly<GroupTransportOptions> = PackageBuffer.DEFAULT_OPTIONS;
+
+    public static buildOptions(options: Partial<GroupTransportOptions>): GroupTransportOptions {
+        return loadDefaults(options,GroupTransport.DEFAULT_OPTIONS);
     }
 
     private _directSendMultiTransmit(preparedPackage: PreparedPackage) {

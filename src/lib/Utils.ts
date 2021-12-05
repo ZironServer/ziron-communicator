@@ -10,7 +10,21 @@ export const RESOLVED_PROMISE = Object.freeze(Promise.resolve()) as Promise<void
 export const MAX_UINT_32 = 4294967295;
 export const MAX_SUPPORTED_ARRAY_BUFFER_SIZE = MAX_UINT_32 - 1;
 
-export type SendFunction= (msg: ArrayBuffer | string, binary?: boolean, compressed?: boolean) => void;
+export type SendFunction= (msg: ArrayBuffer | string, binary?: boolean, batch?: boolean) => void;
+
+/**
+ * @description
+ * Sets the not specified options by loading them from the default options.
+ * Notice that no copy will be made, and the returned value is the options object.
+ * @param options
+ * @param defaults
+ */
+export function loadDefaults<T>(options: Partial<T>,defaults: T): T {
+    for (const key in defaults) {
+        if(!options.hasOwnProperty(key)) options[key] = defaults[key];
+    }
+    return options as T;
+}
 
 /**
  * Guesses the string max byte size in UTF-8.
