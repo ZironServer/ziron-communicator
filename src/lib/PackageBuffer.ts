@@ -271,8 +271,11 @@ export default class PackageBuffer {
     }
 
     private static _batchBinaryContentPackets(binaries: ArrayBuffer[]): ArrayBuffer {
-        if(binaries.length === 0) throw new Error("Can not batch empty binary content packets array.");
         const length = binaries.length;
+        if(length < 2) {
+            if(length === 1) return binaries[0];
+            else throw new Error("Can not batch empty binary content packets array.");
+        }
         let size = 1 + (length * 4 - 4), i: number, bi = 1;
         for(i = 0; i < length; i++) size += binaries[i].byteLength - 1;
         const dataView = new DataView(new ArrayBuffer(size));
