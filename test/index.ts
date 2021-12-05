@@ -216,6 +216,12 @@ describe('Ziron', () => {
         processComplexTypes: true
       },
       {
+        title: 'A should receive the response of invoke with MixedJSON and internal special keys (_b and _s).',
+        respData: {_b: new ArrayBuffer(5),cover: new ArrayBuffer(15),_s: 10,test: {_b: 10}},
+        expectedData: {_b: new ArrayBuffer(5),cover: new ArrayBuffer(15),_s: 10,test: {_b: 10}},
+        processComplexTypes: true
+      },
+      {
         title: 'A should receive the response of invoke but without binary data (processComplexTypes: false).',
         respData: new ArrayBuffer(200),
         expectedData: {},
