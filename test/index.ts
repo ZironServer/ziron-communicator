@@ -23,19 +23,19 @@ chai.use(chaiAsPromised);
 const comA1 = new Transport({
   onInvalidMessage: (err) => console.error('A1: Invalid meessage: ', err),
   onListenerError: (err) => console.error('A1: Listener err: ', err),
-},true);
+},{...Transport.DEFAULT_OPTIONS},true);
 const comB1 = new Transport({
   onInvalidMessage: (err) => console.error('B1: Invalid meessage: ', err),
   onListenerError: (err) => console.error('B1: Listener err: ', err),
-},true);
+},{...Transport.DEFAULT_OPTIONS},true);
 const comA2 = new Transport({
   onInvalidMessage: (err) => console.error('A2: Invalid meessage: ', err),
   onListenerError: (err) => console.error('A2: Listener err: ', err),
-},true);
+},{...Transport.DEFAULT_OPTIONS},true);
 const comB2 = new Transport({
   onInvalidMessage: (err) => console.error('B2: Invalid meessage: ', err),
   onListenerError: (err) => console.error('B2: Listener err: ', err),
-},true);
+},{...Transport.DEFAULT_OPTIONS},true);
 
 const comBGroup = new GroupTransport((msg) => {
   comB1.emitMessage(msg);
@@ -78,8 +78,8 @@ describe('Ziron', () => {
       com.hasLowBackpressure = () => true;
       com.onTransmit = () => {};
       com.onInvoke = () => {};
-      com.buffer.maxBufferChunkLength = 200;
-      com.buffer.maxBufferSize = Number.POSITIVE_INFINITY;
+      com.options.maxBufferChunkLength = 200;
+      com.options.maxBufferSize = Number.POSITIVE_INFINITY;
     });
   })
 
@@ -892,8 +892,8 @@ describe('Ziron', () => {
         if(receivedI === count) done();
       };
 
-      comA1.buffer.maxBufferChunkLength = 5;
-      comA1.buffer.limitBatchStringPacketLength = 2;
+      comA1.options.maxBufferChunkLength = 5;
+      comA1.options.limitBatchStringLength = 2;
       for(let i = 0; i < count; i++){
         comA1.transmit('batch','msg',{batch: 50});
       }
@@ -915,8 +915,8 @@ describe('Ziron', () => {
         }
       };
 
-      comA1.buffer.maxBufferChunkLength = 20;
-      comA1.buffer.limitBatchStringPacketLength = 20000;
+      comA1.options.maxBufferChunkLength = 20;
+      comA1.options.limitBatchStringLength = 20000;
       for(let i = 0; i < dataLength; i++){
         //send text and binary packages
         const data = i % 4 === 0 ? new ArrayBuffer(i) : i % 10 === 0 ? {
@@ -1095,7 +1095,7 @@ describe('Ziron', () => {
 
     it(`Should throw InsufficientBufferSizeError when transmitting a package that does not fit in the buffer (With an unconnected source).`, () => {
       comA1.emitBadConnection(BadConnectionType.Disconnect);
-      comA1.buffer.maxBufferSize = 200;
+      comA1.options.maxBufferSize = 200;
       expect(function () {
         comA1.transmit("test",{pic: new ArrayBuffer(400)},{processComplexTypes: true});
       }).to.throw(InsufficientBufferSizeError);
