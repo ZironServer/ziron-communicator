@@ -4,7 +4,7 @@ import {
   BadConnectionType,
   DataType, GroupTransport, InsufficientBufferSizeError,
   JSONString,
-  PreparedPackage,
+  Package,
   ReadStream,
   StreamCloseError,
   StreamErrorCloseCode,
@@ -192,7 +192,7 @@ describe('Ziron', () => {
 
         const prepPackage = Transport.prepareMultiTransmit('person',test.data,
           {processComplexTypes: test.processComplexTypes});
-        [comA1,comA2].forEach(c => c.sendPreparedPackage(prepPackage))
+        [comA1,comA2].forEach(c => c.sendPackage(prepPackage))
 
         await receivePromise;
       });
@@ -943,10 +943,10 @@ describe('Ziron', () => {
         receivedI++;
       };
 
-      const packages: PreparedPackage[] = [];
+      const packages: Package[] = [];
       for(let i = 0; i < count; i++){
         packages.push(Transport.prepareMultiTransmit('batch','msg'));
-        comA1.sendPreparedPackage(packages[i],10);
+        comA1.sendPackage(packages[i],10);
       }
       packages.forEach(pack => comA1.tryCancelPackage(pack));
 

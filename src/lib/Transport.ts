@@ -26,7 +26,7 @@ import {
     TimeoutError,
     TimeoutType
 } from "./Errors";
-import {PreparedInvokePackage, PreparedPackage} from "./PreparedPackage";
+import {InvokePackage, Package} from "./Package";
 import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
 
 export interface ComplexTypesOption {
@@ -149,14 +149,14 @@ export default class Transport {
 
     /**
      * Can not be reset on connection lost
-     * because prepared packets with old ids can exist.
+     * because packages with old ids can exist.
      */
     private _binaryContentPacketId: number = 0;
     private _binaryContentResolver: Record<number,BinaryContentResolver> = {};
 
     /**
      * Can not be reset on connection lost
-     * because prepared packets with old ids can exist.
+     * because packages with old ids can exist.
      */
     private _objectStreamId: number = 1;
     private _binaryStreamId: number = -1;
@@ -165,7 +165,7 @@ export default class Transport {
 
     /**
      * Can not be reset on connection lost
-     * because prepared packets with old ids can exist.
+     * because packages with old ids can exist.
      */
     private _cid: number = 0;
     private _invokeResponsePromises: Record<number,
@@ -491,7 +491,7 @@ export default class Transport {
             const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
             data = this._processMixedJSONDeep(data,binaries,streams);
 
-            const preparedPackage: PreparedPackage = [
+            const pack: Package = [
                 PacketType.InvokeDataResp + ',' + callId + ',' +
                 parseJSONDataType(binaries.length > 0, streams.length > 0) +
                     (data !== undefined ? (',' + encodeJson(data)) : '')
@@ -499,14 +499,14 @@ export default class Transport {
 
             if(binaries.length > 0) {
                 const binaryContentPacketId = this._getNewBinaryContentPacketId();
-                preparedPackage[0] += "," + binaryContentPacketId;
-                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+                pack[0] += "," + binaryContentPacketId;
+                pack[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
             }
             if(streams.length > 0)
-                preparedPackage._afterSend = () => {for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();}
+                pack._afterSend = () => {for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();}
 
-            this._send(preparedPackage[0]);
-            if(preparedPackage.length > 1) this._send(preparedPackage[1]!, true);
+            this._send(pack[0]);
+            if(pack.length > 1) this._send(pack[1]!, true);
         }
     }
 
@@ -725,10 +725,10 @@ export default class Transport {
 
     //Send
     /**
-     * Notice that the prepared package can not send multiple times.
+     * Notice that the package can not send multiple times.
      * If you need this you can check out the static method prepareMultiTransmit.
      * Also after preparing you should not send millions of other
-     * packages before sending the prepared package.
+     * packages before sending the created package.
      * It is perfect to prepare packages when the connection
      * is lost and send them when the socket is connected again.
      * @param receiver
@@ -737,14 +737,14 @@ export default class Transport {
      * @param data
      * @param processComplexTypes
      */
-    prepareTransmit(receiver: string, data?: any, {processComplexTypes}: ComplexTypesOption = {}): PreparedPackage {
+    prepareTransmit(receiver: string, data?: any, {processComplexTypes}: ComplexTypesOption = {}): Package {
         if(!processComplexTypes) {
             return [PacketType.Transmit + ',"' + receiver + '",' +
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
         }
         else if(data instanceof WriteStream && this.options.streamsEnabled){
             const streamId = this._getNewStreamId(data.binary);
-            const packet: PreparedPackage = [PacketType.Transmit + ',"' + receiver + '",' +
+            const packet: Package = [PacketType.Transmit + ',"' + receiver + '",' +
                 DataType.Stream + ',' + streamId];
             data._init(this,streamId);
             packet._afterSend = () => data._onTransmitted();
@@ -760,7 +760,7 @@ export default class Transport {
             const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
             data = this._processMixedJSONDeep(data,binaries,streams);
 
-            const preparedPackage: PreparedPackage = [
+            const pack: Package = [
                 PacketType.Transmit + ',"' + receiver + '",' +
                 parseJSONDataType(binaries.length > 0,streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '')
@@ -768,19 +768,19 @@ export default class Transport {
 
             if(binaries.length > 0) {
                 const binaryContentPacketId = this._getNewBinaryContentPacketId();
-                preparedPackage[0] += "," + binaryContentPacketId;
-                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+                pack[0] += "," + binaryContentPacketId;
+                pack[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
             }
             if(streams.length > 0)
-                preparedPackage._afterSend = () => {for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();}
-            return preparedPackage;
+                pack._afterSend = () => {for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();}
+            return pack;
         }
     }
 
     /**
-     * Notice that the prepared package can not send multiple times.
+     * Notice that the package can not send multiple times.
      * Also after preparing you should not send millions of other
-     * packages before sending the prepared package.
+     * packages before sending the created package.
      * It is perfect to prepare packages when the connection
      * is lost and send them when the socket is connected again.
      * @param procedure
@@ -795,14 +795,14 @@ export default class Transport {
         procedure: string,
         data?: any,
         {ackTimeout,processComplexTypes,returnDataType}: {ackTimeout?: number | null, returnDataType?: RDT} & ComplexTypesOption = {}
-        ): PreparedInvokePackage<RDT extends true ? [any,DataType] : any>
+        ): InvokePackage<RDT extends true ? [any,DataType] : any>
     {
         const callId = this._getNewCid();
-        const preparedPackage: PreparedInvokePackage = [] as any;
+        const pack: InvokePackage = [] as any;
 
         if(!processComplexTypes) {
-            preparedPackage.promise = new Promise<any>((resolve, reject) => {
-                preparedPackage._afterSend = () => {
+            pack.promise = new Promise<any>((resolve, reject) => {
+                pack._afterSend = () => {
                     this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
                     this._invokeResponsePromises[callId].timeout = setTimeout(() => {
                         delete this._invokeResponsePromises[callId];
@@ -810,14 +810,14 @@ export default class Transport {
                     }, ackTimeout || this.options.ackTimeout);
                 }
             });
-            preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
+            pack[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '');
-            return preparedPackage;
+            return pack;
         }
         else {
             let setResponse: (() => void) | undefined = undefined;
             let setResponseTimeout: (() => void) | undefined = undefined;
-            preparedPackage.promise = new Promise<any>((resolve, reject) => {
+            pack.promise = new Promise<any>((resolve, reject) => {
                 setResponse = () => {
                     this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
                 }
@@ -831,88 +831,88 @@ export default class Transport {
             });
 
             if(data instanceof WriteStream && this.options.streamsEnabled){
-                const sent = new Promise(res => preparedPackage._afterSend = () => {
+                const sent = new Promise(res => pack._afterSend = () => {
                     setResponse!();
                     res();
                     (data as WriteStream<any>)._onTransmitted();
                 });
                 const streamId = this._getNewStreamId(data.binary);
-                preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
+                pack[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                     DataType.Stream + ',' + streamId;
                 Promise.all([sent,data.closed]).then(setResponseTimeout);
                 data._init(this,streamId);
-                return preparedPackage;
+                return pack;
             }
             else if(data instanceof ArrayBuffer) {
-                preparedPackage._afterSend = () => {
+                pack._afterSend = () => {
                     setResponse!();
                     setResponseTimeout!();
                 }
                 const binaryContentPacketId = this._getNewBinaryContentPacketId();
-                preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
+                pack[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                     DataType.Binary + ',' + binaryContentPacketId;
-                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,data);
-                return preparedPackage;
+                pack[1] = Transport._createBinaryContentPacket(binaryContentPacketId,data);
+                return pack;
             }
             else {
                 const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
                 data = this._processMixedJSONDeep(data,binaries,streams);
 
                 if(streams.length > 0) {
-                    const sent = new Promise(res => preparedPackage._afterSend = () => {
+                    const sent = new Promise(res => pack._afterSend = () => {
                         setResponse!();
                         res();
                         for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();
                     });
                     Promise.all([sent,...streams.map(stream => stream.closed)]).then(setResponseTimeout);
                 }
-                else preparedPackage._afterSend = () => {
+                else pack._afterSend = () => {
                     setResponse!();
                     setResponseTimeout!();
                 }
 
-                preparedPackage[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
+                pack[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
                     parseJSONDataType(binaries.length > 0,streams.length > 0) +
                     (data !== undefined ? (',' + encodeJson(data)) : '');
 
                 if(binaries.length > 0) {
                     const binaryContentPacketId = this._getNewBinaryContentPacketId();
-                    preparedPackage[0] += "," + binaryContentPacketId;
-                    preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+                    pack[0] += "," + binaryContentPacketId;
+                    pack[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
                 }
 
-                return preparedPackage;
+                return pack;
             }
         }
     }
 
     // noinspection JSUnusedGlobalSymbols
-    sendPreparedPackage(preparedPackage: PreparedPackage, batch?: number | true | null): void {
-        if(!this.open) this.buffer.add(preparedPackage);
-        else if(batch) this.buffer.add(preparedPackage,batch);
-        else this._directSendPreparedPackage(preparedPackage);
+    sendPackage(pack: Package, batch?: number | true | null): void {
+        if(!this.open) this.buffer.add(pack);
+        else if(batch) this.buffer.add(pack,batch);
+        else this._directSendPackage(pack);
     }
 
     // noinspection JSUnusedGlobalSymbols
-    sendPreparedPackageWithPromise(preparedPackage: PreparedPackage, batch?: number | true | null): Promise<void> {
+    sendPackageWithPromise(pack: Package, batch?: number | true | null): Promise<void> {
         if(batch) {
             return new Promise((resolve) => {
-                const tmpAfterSend = preparedPackage._afterSend;
-                preparedPackage._afterSend = () => {
+                const tmpAfterSend = pack._afterSend;
+                pack._afterSend = () => {
                     if(tmpAfterSend) tmpAfterSend();
                     resolve();
                 }
-                this.buffer.add(preparedPackage,batch);
+                this.buffer.add(pack,batch);
             })
         }
-        else if(this.open) return this._directSendPreparedPackage(preparedPackage), RESOLVED_PROMISE;
+        else if(this.open) return this._directSendPackage(pack), RESOLVED_PROMISE;
         else return new Promise((resolve) => {
-            const tmpAfterSend = preparedPackage._afterSend;
-            preparedPackage._afterSend = () => {
+            const tmpAfterSend = pack._afterSend;
+            pack._afterSend = () => {
                 if(tmpAfterSend) tmpAfterSend();
                 resolve();
             }
-            this.buffer.add(preparedPackage);
+            this.buffer.add(pack);
         })
     }
 
@@ -922,13 +922,13 @@ export default class Transport {
         Promise<RDT extends true ? [any,DataType] : any>
     {
         const prePackage = this.prepareInvoke(procedure,data,options);
-        this.sendPreparedPackage(prePackage,options.batch);
+        this.sendPackage(prePackage,options.batch);
         return prePackage.promise;
     }
 
     // noinspection JSUnusedGlobalSymbols
     transmit(receiver: string, data?: any, options: {batch?: number | true | null} & ComplexTypesOption = {}) {
-        this.sendPreparedPackage(this.prepareTransmit(receiver,data,options),options.batch);
+        this.sendPackage(this.prepareTransmit(receiver,data,options),options.batch);
     }
 
     // noinspection JSUnusedGlobalSymbols
@@ -943,10 +943,10 @@ export default class Transport {
         catch (_) {}
     }
 
-    private _directSendPreparedPackage(preparedPackage: PreparedPackage) {
-        this._send(preparedPackage[0])
-        if(preparedPackage.length > 1) this._send(preparedPackage[1]!,true);
-        if(preparedPackage._afterSend) preparedPackage._afterSend();
+    private _directSendPackage(pack: Package) {
+        this._send(pack[0])
+        if(pack.length > 1) this._send(pack[1]!,true);
+        if(pack._afterSend) pack._afterSend();
     }
 
     /**
@@ -977,7 +977,7 @@ export default class Transport {
             const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
             data = this._processMixedJSONDeep(data,binaries,streams);
 
-            const preparedPackage: PreparedPackage = [
+            const pack: Package = [
                 (end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + parseJSONDataType(binaries.length > 0 || streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '')
@@ -985,12 +985,12 @@ export default class Transport {
 
             if(binaries.length > 0) {
                 const binaryContentPacketId = this._getNewBinaryContentPacketId();
-                preparedPackage[0] += "," + binaryContentPacketId;
-                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+                pack[0] += "," + binaryContentPacketId;
+                pack[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
             }
 
-            this._send(preparedPackage[0]);
-            if(preparedPackage.length > 1) this._send(preparedPackage[1]!,true);
+            this._send(pack[0]);
+            if(pack.length > 1) this._send(pack[1]!,true);
             for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();
         }
     }
@@ -1072,10 +1072,10 @@ export default class Transport {
      * @description
      * Tries to cancel a package sent if it is not already sent.
      * The returned boolean indicates if it was successfully cancelled.
-     * @param preparedPackage
+     * @param pack
      */
-    public tryCancelPackage(preparedPackage: PreparedPackage): boolean {
-        return this.buffer.tryRemove(preparedPackage);
+    public tryCancelPackage(pack: Package): boolean {
+        return this.buffer.tryRemove(pack);
     }
 
     /**
@@ -1096,7 +1096,7 @@ export default class Transport {
 
     /**
      * @description
-     * Creates a prepared transmit package that can be sent to multiple transporters
+     * Creates a transmit package that can be sent to multiple transporters
      * but not multiple times to the same transport (except there is no binary data in the package).
      * This is extremely efficient when sending to a lot of transporters.
      * Notice that streams are not supported but binaries are supported.
@@ -1107,7 +1107,7 @@ export default class Transport {
      * @param data
      * @param processComplexTypes
      */
-    public static prepareMultiTransmit(receiver: string, data?: any, {processComplexTypes}: ComplexTypesOption = {}): PreparedPackage {
+    public static prepareMultiTransmit(receiver: string, data?: any, {processComplexTypes}: ComplexTypesOption = {}): Package {
         if(!processComplexTypes) {
             return [PacketType.Transmit + ',"' + receiver + '",' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
@@ -1121,17 +1121,17 @@ export default class Transport {
         else {
             const binaries: ArrayBuffer[] = [];
             data = Transport._processMultiMixedJSONDeep(data,binaries);
-            const preparedPackage: PreparedPackage = [
+            const pack: Package = [
                 PacketType.Transmit + ',"' + receiver + '",' +
                 parseJSONDataType(binaries.length > 0,false) +
                 (data !== undefined ? (',' + encodeJson(data)) : '')
             ];
             if(binaries.length > 0) {
                 const binaryContentPacketId = Transport._getNewMultiBinaryContentPacketId();
-                preparedPackage[0] += "," + binaryContentPacketId;
-                preparedPackage[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
+                pack[0] += "," + binaryContentPacketId;
+                pack[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
             }
-            return preparedPackage;
+            return pack;
         }
     }
 

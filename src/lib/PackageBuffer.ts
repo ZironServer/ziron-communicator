@@ -5,7 +5,7 @@ Copyright(c) Ing. Luca Gian Scaringella
  */
 
 import {NEXT_BINARIES_PACKET_TOKEN, PacketType} from "./Protocol";
-import {PreparedPackage} from "./PreparedPackage";
+import {Package} from "./Package";
 import {guessStringSize, loadDefaults, SendFunction} from "./Utils";
 import {InsufficientBufferSizeError} from "./Errors";
 
@@ -71,7 +71,7 @@ export default class PackageBuffer {
         public options: PackageBufferOptions = {...PackageBuffer.DEFAULT_OPTIONS}
     ) {}
 
-    private _buffer: PreparedPackage[] = [];
+    private _buffer: Package[] = [];
     private _bufferSize: number = 0;
 
     private _bufferTimeoutDelay: number | undefined;
@@ -126,7 +126,7 @@ export default class PackageBuffer {
      * @param pack
      * @private
      */
-    private _addPreparedPackageSize(pack: PreparedPackage) {
+    private _addPackageSize(pack: Package) {
         pack._size = this.options.stringSizeDeterminer(pack[0]);
         for(let i = pack.length - 1; i > 0; i--)
             pack._size += (pack[i] as ArrayBuffer).byteLength;
@@ -147,21 +147,21 @@ export default class PackageBuffer {
      * the buffer will be flushed automatically.
      * When it is not possible to flush the buffer in such a state,
      * an InsufficientBufferSizeError will be thrown.
-     * @param preparedPackage
+     * @param pack
      * @param batch
      */
-    public add(preparedPackage: PreparedPackage, batch?: number | true) {
-        this._addPreparedPackageSize(preparedPackage);
-        if(this._bufferSize + preparedPackage._size! > this.options.maxBufferSize) {
+    public add(pack: Package, batch?: number | true) {
+        this._addPackageSize(pack);
+        if(this._bufferSize + pack._size! > this.options.maxBufferSize) {
             //would max out buffer..
             if(this.isOpen()) {
                 //Flush with new package directly.
-                this._pushToBuffer(preparedPackage);
+                this._pushToBuffer(pack);
                 this._internalFlushBuffer();
             }
-            else throw new InsufficientBufferSizeError("PreparedPackageBuffer");
+            else throw new InsufficientBufferSizeError("PackageBuffer");
         }
-        else this._pushToBuffer(preparedPackage);
+        else this._pushToBuffer(pack);
         if(typeof batch === "number") this._setBatchTime(batch);
     }
 
@@ -169,13 +169,13 @@ export default class PackageBuffer {
      * @description
      * Tries to remove a package from the buffer if it is not already sent.
      * The returned boolean indicates if it was successfully removed.
-     * @param preparedPackage
+     * @param pack
      */
-    public tryRemove(preparedPackage: PreparedPackage): boolean {
-        const index = this._buffer.indexOf(preparedPackage);
+    public tryRemove(pack: Package): boolean {
+        const index = this._buffer.indexOf(pack);
         if(index !== -1) {
             this._buffer.splice(index,1);
-            this._bufferSize -= preparedPackage._size!;
+            this._bufferSize -= pack._size!;
             if(this._buffer.length === 0 && this._bufferTimeoutTicker) {
                 clearTimeout(this._bufferTimeoutTicker);
                 this._bufferTimeoutTicker = undefined;
@@ -185,7 +185,7 @@ export default class PackageBuffer {
         return false;
     }
 
-    private _pushToBuffer(pack: PreparedPackage) {
+    private _pushToBuffer(pack: Package) {
         this._buffer.push(pack);
         this._bufferSize += pack._size!;
     }
@@ -250,7 +250,7 @@ export default class PackageBuffer {
         }
     }
 
-    private _sendBufferChunk(packages: PreparedPackage[]) {
+    private _sendBufferChunk(packages: Package[]) {
         const batchPackage = this._batchCompress(packages),
             listLength = packages.length,
             batch = batchPackage.length < packages.length;
@@ -263,22 +263,22 @@ export default class PackageBuffer {
     /**
      * @description
      * The created batch will keep the order of packages.
-     * @param preparedPackages
+     * @param packages
      * @private
      */
-    private _batchCompress(preparedPackages: PreparedPackage[]): (string|ArrayBuffer)[] {
-        if(preparedPackages.length < 1) return [];
-        else if(preparedPackages.length === 1) return preparedPackages[0] as (string|ArrayBuffer)[];
+    private _batchCompress(packages: Package[]): (string|ArrayBuffer)[] {
+        if(packages.length < 1) return [];
+        else if(packages.length === 1) return packages[0] as (string|ArrayBuffer)[];
 
-        const batchPackets: (string|ArrayBuffer)[] = [], len = preparedPackages.length;
+        const batchPackets: (string|ArrayBuffer)[] = [], len = packages.length;
         let tmpStringPacket: string = "",tmpBinaryPackets: ArrayBuffer[] = [],
-            tmpPreparedPackage: PreparedPackage, bundleHasBinary: boolean = false;
+            tmpPackage: Package, bundleHasBinary: boolean = false;
 
         for(let i = 0; i < len; i++) {
-            tmpPreparedPackage = preparedPackages[i];
-            if((bundleHasBinary && tmpPreparedPackage.length === 1) ||
+            tmpPackage = packages[i];
+            if((bundleHasBinary && tmpPackage.length === 1) ||
                 (tmpStringPacket.length > 0 &&
-                    (tmpStringPacket.length + tmpPreparedPackage[0].length) > this.options.limitBatchStringLength))
+                    (tmpStringPacket.length + tmpPackage[0].length) > this.options.limitBatchStringLength))
             {
                 batchPackets.push(PacketType.Bundle +
                     ',[' + tmpStringPacket.substring(0, tmpStringPacket.length - 1) + ']');
@@ -287,9 +287,9 @@ export default class PackageBuffer {
                 tmpStringPacket = '';
                 bundleHasBinary = false;
             }
-            tmpStringPacket += ('[' + tmpPreparedPackage[0] + '],');
-            if(tmpPreparedPackage.length > 1) {
-                tmpBinaryPackets.push(tmpPreparedPackage[1]!);
+            tmpStringPacket += ('[' + tmpPackage[0] + '],');
+            if(tmpPackage.length > 1) {
+                tmpBinaryPackets.push(tmpPackage[1]!);
                 bundleHasBinary = true;
             }
         }

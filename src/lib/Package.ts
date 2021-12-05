@@ -5,11 +5,11 @@ Copyright(c) Ing. Luca Gian Scaringella
  */
 
 /**
- * A prepared package contains prepared or multiple packets.
- * The first packet is always the string header packet,
- * followed by optional binary packets.
+ * A package contains a string header packet
+ * followed by an optional binary content packet.
+ * Also, it has some internal used properties.
  */
-export type PreparedPackage = [string,ArrayBuffer?] & {
+export type Package = [string,ArrayBuffer?] & {
     /**
      * @description
      * Used to set the ack timeout.
@@ -26,6 +26,6 @@ export type PreparedPackage = [string,ArrayBuffer?] & {
     _size?: number;
 };
 
-export type PreparedInvokePackage<T = any> = PreparedPackage & {
+export type InvokePackage<T = any> = Package & {
     promise: Promise<T>
 }

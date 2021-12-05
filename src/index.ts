@@ -26,7 +26,7 @@ import {
 } from "./lib/Errors";
 import {dehydrateError, hydrateError} from "./lib/ErrorUtils";
 import StreamCloseError from "./lib/streams/StreamCloseError";
-import { PreparedPackage } from "./lib/PreparedPackage";
+import { Package } from "./lib/Package";
 import PackageBuffer, {PackageBufferOptions} from "./lib/PackageBuffer";
 import GroupTransport, {GroupTransportOptions} from "./lib/GroupTransport";
 import {escapeJSONString, MAX_SUPPORTED_ARRAY_BUFFER_SIZE} from "./lib/Utils";
@@ -60,7 +60,7 @@ export {
     DataType,
     TransmitListener,
     InvokeListener,
-    PreparedPackage,
+    Package,
     ComplexTypesOption,
     hydrateError,
     dehydrateError,

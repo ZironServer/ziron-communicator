@@ -5,7 +5,7 @@ Copyright(c) Ing. Luca Gian Scaringella
  */
 
 import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
-import {PreparedPackage} from "./PreparedPackage";
+import {Package} from "./Package";
 import Transport, {ComplexTypesOption} from "./Transport";
 import {loadDefaults, SendFunction} from "./Utils";
 
@@ -50,11 +50,11 @@ export default class GroupTransport {
         return loadDefaults(options,GroupTransport.DEFAULT_OPTIONS);
     }
 
-    private _directSendMultiTransmit(preparedPackage: PreparedPackage) {
-        this.send(preparedPackage[0]);
-        if(preparedPackage.length > 1)
-            this.send(preparedPackage[1]!,true);
-        if(preparedPackage._afterSend) preparedPackage._afterSend();
+    private _directSendMultiTransmit(pack: Package) {
+        this.send(pack[0]);
+        if(pack.length > 1)
+            this.send(pack[1]!,true);
+        if(pack._afterSend) pack._afterSend();
     }
 
     /**
@@ -66,9 +66,9 @@ export default class GroupTransport {
      * @param options
      */
     transmit(receiver: string, data?: any, options: {batch?: number | true | null} & ComplexTypesOption = {}) {
-        const preparedPackage = Transport.prepareMultiTransmit(receiver,data,options);
-        if(!this.isConnected()) this.buffer.add(preparedPackage);
-        else if(options.batch) this.buffer.add(preparedPackage,options.batch);
-        else this._directSendMultiTransmit(preparedPackage);
+        const pack = Transport.prepareMultiTransmit(receiver,data,options);
+        if(!this.isConnected()) this.buffer.add(pack);
+        else if(options.batch) this.buffer.add(pack,options.batch);
+        else this._directSendMultiTransmit(pack);
     }
 }
