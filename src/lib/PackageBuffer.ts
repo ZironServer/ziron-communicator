@@ -205,9 +205,11 @@ export default class PackageBuffer {
     }
 
     private _sendBufferChunk(packages: PreparedPackage[]) {
-        const compressPackage = this._compressPreparedPackages(packages),
-            listLength = packages.length, compressHint = packages.length > 1;
-        for(let i = 0; i < compressPackage.length; i++) this.send(compressPackage[i],compressHint);
+        const compressedPackage = this._compressPreparedPackages(packages),
+            listLength = packages.length,
+            compressed = packages.length > 1 && compressedPackage.length < packages.length;
+        for(let i = 0; i < compressedPackage.length; i++) this.send(compressedPackage[i],
+            typeof compressedPackage[i] === 'object',compressed);
         for(let i = 0; i < listLength; i++) if(packages[i]._afterSend) packages[i]._afterSend!();
     }
 
