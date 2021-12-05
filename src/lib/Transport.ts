@@ -11,7 +11,13 @@ import {decodeJson, encodeJson, JSONString} from "./JsonUtils";
 import ReadStream from "./streams/ReadStream";
 import WriteStream from "./streams/WriteStream";
 import {StreamErrorCloseCode} from "./streams/StreamErrorCloseCode";
-import {MAX_SUPPORTED_ARRAY_BUFFER_SIZE, RESOLVED_PROMISE, SendFunction, Writable} from "./Utils";
+import {
+    escapePlaceholderSequence,
+    MAX_SUPPORTED_ARRAY_BUFFER_SIZE,
+    RESOLVED_PROMISE,
+    SendFunction, unescapePlaceholderSequence,
+    Writable
+} from "./Utils";
 import {
     BadConnectionError,
     BadConnectionType,
@@ -552,8 +558,16 @@ export default class Transport {
                     meta.streamCount++;
                     obj[key] = new Transport.readStream(value['_s'],this);
                 }
-                else for(const key in value)
-                    this._internalResolveMixedJSONDeep(value,key,options,meta);
+                else {
+                    const clone = {};
+                    let unescapedKey: string;
+                    for(const key in value) {
+                        unescapedKey = unescapePlaceholderSequence(key);
+                        clone[unescapedKey] = value[key];
+                        this._internalResolveMixedJSONDeep(clone,unescapedKey,options,meta);
+                    }
+                    obj[key] = clone;
+                }
             }
         }
     }
@@ -616,7 +630,7 @@ export default class Transport {
                 const clone = {};
                 for(const key in data) {
                     // noinspection JSUnfilteredForInLoop
-                    clone[key] = this._processMixedJSONDeep(data[key], binaries, streams);
+                    clone[escapePlaceholderSequence(key)] = this._processMixedJSONDeep(data[key], binaries, streams);
                 }
                 return clone;
             }
@@ -1110,7 +1124,7 @@ export default class Transport {
                 const clone = {};
                 for(const key in data) {
                     // noinspection JSUnfilteredForInLoop
-                    clone[key] = Transport._processMultiMixedJSONDeep(data[key],binaries);
+                    clone[escapePlaceholderSequence(key)] = Transport._processMultiMixedJSONDeep(data[key],binaries);
                 }
                 return clone;
             }

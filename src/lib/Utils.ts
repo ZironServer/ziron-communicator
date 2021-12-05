@@ -30,3 +30,25 @@ export function escapeJSONString(str: string): string {
     return str.replace(/[\\"']/g, '\\$&')
         .replace(/\u0000/g, '\\0');
 }
+
+/**
+ * @description
+ * Escapes reserved placeholder char sequence for streams and binary content.
+ * @param key
+ */
+export function escapePlaceholderSequence(key: string): string {
+    if(key.indexOf("_") === -1) return key;
+    return key.replace('_b','__b')
+            .replace("_s","__s");
+}
+
+/**
+ * @description
+ * Unescapes reserved placeholder char sequence for streams and binary content.
+ * @param key
+ */
+export function unescapePlaceholderSequence(key: string): string {
+    if(key.indexOf("_") === -1) return key;
+    return key.replace('__b','_b')
+        .replace("__s","_s");
+}
