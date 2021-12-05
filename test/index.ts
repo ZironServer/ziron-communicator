@@ -124,6 +124,13 @@ describe('Ziron', () => {
         expectedData: {avatar: new ArrayBuffer(5),cover: new ArrayBuffer(15)},
         expectedDataType: DataType.JSONWithBinaries,
         processComplexTypes: true
+      },
+      {
+        title: 'B should receive the transmit with MixedJSON (JSON with binary) and internal special keys (_b and _s).',
+        data: {_b: new ArrayBuffer(5),cover: new ArrayBuffer(15),_s: 10,test: {_b: 10}},
+        expectedData: {_b: new ArrayBuffer(5),cover: new ArrayBuffer(15),_s: 10,test: {_b: 10}},
+        expectedDataType: DataType.JSONWithBinaries,
+        processComplexTypes: true
       }
     ].forEach(test => {
       it(test.title, async () => {
