@@ -6,7 +6,7 @@ Copyright(c) Ing. Luca Gian Scaringella
 
 import {NEXT_BINARIES_PACKET_TOKEN, PacketType} from "./Protocol";
 import {Package} from "./Package";
-import {guessStringSize, loadDefaults, SendFunction} from "./Utils";
+import {approximateMaxUTF8Size, loadDefaults, SendFunction} from "./Utils";
 import {InsufficientBufferSizeError} from "./Errors";
 
 export interface PackageBufferOptions {
@@ -20,7 +20,7 @@ export interface PackageBufferOptions {
      * an InsufficientBufferSizeError will be thrown.
      * Notice that the stringSizeDeterminer is used to determine the
      * UTF-8 string encoded byte size of string packets.
-     * By default, guessStringSize is used for performance reasons but
+     * By default, approximateMaxUTF8Size is used for performance reasons but
      * can be replaced with a function that determines the byte size specific.
      * @default Number.POSITIVE_INFINITY
      */
@@ -53,9 +53,9 @@ export interface PackageBufferOptions {
     /**
      * @description
      * Used to find out the UTF-8 byte size of a string to detect if the buffer space is enough.
-     * Defaults to guessStringSize for performance reasons but can be
+     * Defaults to approximateMaxUTF8Size for performance reasons but can be
      * replaced with a function that determines the byte size specific.
-     * @default guessStringSize
+     * @default approximateMaxUTF8Size
      */
     stringSizeDeterminer: (str: string) => number;
 }
@@ -88,7 +88,7 @@ export default class PackageBuffer {
         maxBufferChunkLength: 200,
         limitBatchStringLength: 310000,
         limitBatchBinarySize: 3145728,
-        stringSizeDeterminer: guessStringSize
+        stringSizeDeterminer: approximateMaxUTF8Size
     }
 
     public static buildOptions(options: Partial<PackageBufferOptions>): PackageBufferOptions {

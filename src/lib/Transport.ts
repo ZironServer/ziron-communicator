@@ -12,7 +12,7 @@ import ReadStream from "./streams/ReadStream";
 import WriteStream from "./streams/WriteStream";
 import {StreamErrorCloseCode} from "./streams/StreamErrorCloseCode";
 import {
-    escapePlaceholderSequence, guessStringSize, loadDefaults,
+    escapePlaceholderSequence, loadDefaults,
     MAX_SUPPORTED_ARRAY_BUFFER_SIZE,
     RESOLVED_PROMISE,
     SendFunction, unescapePlaceholderSequence,
