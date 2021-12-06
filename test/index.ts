@@ -74,8 +74,8 @@ describe('Ziron', () => {
 
   afterEach(() => {
     [comA1,comA2,comB1,comB2].forEach((com) => {
-      com.emitReconnection();
-      com.hasLowBackpressure = () => true;
+      com.emitConnection();
+      com.hasLowSendBackpressure = () => true;
       com.onTransmit = () => {};
       com.onInvoke = () => {};
       com.options.maxBufferChunkLength = 200;
@@ -347,7 +347,7 @@ describe('Ziron', () => {
       comA1.invoke('?').catch(err => {
         expect(err).to.be.instanceof(BadConnectionError)
         done();
-        comA1.emitReconnection();
+        comA1.emitConnection();
       });
       comA1.emitBadConnection(BadConnectionType.Disconnect);
     });
@@ -712,7 +712,7 @@ describe('Ziron', () => {
       comA1.transmit('writeStreams',streams, {processComplexTypes: true});
 
       let backpressure = true;
-      comA1.hasLowBackpressure = () => !backpressure;
+      comA1.hasLowSendBackpressure = () => !backpressure;
 
       for(const stream of streams) {
         stream.write(new ArrayBuffer(10));
@@ -723,7 +723,7 @@ describe('Ziron', () => {
 
         //drain
         backpressure = false;
-        comA1.emitBackpressureDrain();
+        comA1.emitSendBackpressureDrain();
         await new Promise(r => setTimeout(r,20));
 
         //Should receive the chunk.. after drain.
@@ -748,7 +748,7 @@ describe('Ziron', () => {
         data.closed.then((code) => {
           expect(code).to.be.equal(StreamErrorCloseCode.BadConnection);
           done();
-          comB1.emitReconnection();
+          comB1.emitConnection();
         });
         data.accept();
       };

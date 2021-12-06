@@ -136,7 +136,7 @@ export default class Transport {
     public get send(): SendFunction {
         return this._send;
     }
-    public hasLowBackpressure: () => boolean;
+    public hasLowSendBackpressure: () => boolean;
 
     public readonly badConnectionTimestamp: number = -1;
 
@@ -151,12 +151,12 @@ export default class Transport {
             send?: (msg: string | ArrayBuffer) => void;
             /**
              * @description
-             * The write streams will pause when the backpressure is
+             * The write streams will pause when the socket send backpressure is
              * not low and are waiting for low pressure.
              * When this method is used, backpressure draining
-             * must be emitted with the emitBackpressureDrain method.
+             * must be emitted with the emitSendBackpressureDrain method.
              */
-            hasLowBackpressure?: () => boolean;
+            hasLowSendBackpressure?: () => boolean;
         } = {},
         /**
          * Notice that the provided options will not be cloned to save memory and performance.
@@ -171,7 +171,7 @@ export default class Transport {
         this.onPing = connector.onPing || (() => {});
         this.onPong = connector.onPong || (() => {});
         this._send = connector.send || (() => {});
-        this.hasLowBackpressure = connector.hasLowBackpressure || (() => true);
+        this.hasLowSendBackpressure = connector.hasLowSendBackpressure || (() => true);
         this.open = connected;
         this.buffer = new PackageBuffer(this._send,() => this.open,options);
     }
@@ -207,23 +207,23 @@ export default class Transport {
 
     public readonly open: boolean = true;
 
-    private readonly _lowBackpressureWaiters: (() => void)[] = [];
+    private readonly _lowSendBackpressureWaiters: (() => void)[] = [];
 
     /**
      * @internal
      * @private
      */
-    _addLowBackpressureWaiter(waiter: () => void) {
-        this._lowBackpressureWaiters.push(waiter);
+    _addLowSendBackpressureWaiter(waiter: () => void) {
+        this._lowSendBackpressureWaiters.push(waiter);
     }
 
     /**
      * @internal
      * @private
      */
-    _cancelLowBackpressureWaiter(waiter: () => void) {
-        const index = this._lowBackpressureWaiters.indexOf(waiter);
-        if(index !== -1) this._lowBackpressureWaiters.splice(index, 1);
+    _cancelLowSendBackpressureWaiter(waiter: () => void) {
+        const index = this._lowSendBackpressureWaiters.indexOf(waiter);
+        if(index !== -1) this._lowSendBackpressureWaiters.splice(index, 1);
     }
 
     emitMessage(rawMsg: string | ArrayBuffer) {
@@ -263,9 +263,9 @@ export default class Transport {
         catch(e){this.onInvalidMessage(e);}
     }
 
-    emitBackpressureDrain() {
-        while(this._lowBackpressureWaiters.length && this.hasLowBackpressure())
-            this._lowBackpressureWaiters.shift()!();
+    emitSendBackpressureDrain() {
+        while(this._lowSendBackpressureWaiters.length && this.hasLowSendBackpressure())
+            this._lowSendBackpressureWaiters.shift()!();
     }
 
     emitBadConnection(type: BadConnectionType,msg?: string) {
@@ -280,7 +280,7 @@ export default class Transport {
         this._activeWriteStreams = {};
     }
 
-    emitReconnection() {
+    emitConnection() {
         (this as Writable<Transport>).open = true;
         this.buffer.flushBuffer();
     }

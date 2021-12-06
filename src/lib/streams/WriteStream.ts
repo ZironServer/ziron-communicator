@@ -82,7 +82,7 @@ export default class WriteStream<B extends boolean = false> {
     private _sentSize: number = 0;
 
     private _resolveSizePermissionWait: ((err?: Error) => void) | null;
-    private _resolveLowBackpressureWait: ((err?: Error) => void) | null;
+    private _cancelLowSendBackpressureWait: ((err: Error) => void) | null;
 
     private _writeLock: boolean = false;
 
@@ -221,19 +221,20 @@ export default class WriteStream<B extends boolean = false> {
         });
     }
 
-    private waitForLowBackpressure(): Promise<void> | void {
-        if(this._transport.hasLowBackpressure()) return;
-        if(this._resolveLowBackpressureWait) throw new Error("Already waiting for low backpressure");
+    private waitForLowSendBackpressure(): Promise<void> | void {
+        if(this._transport.hasLowSendBackpressure()) return;
+        if(this._cancelLowSendBackpressureWait) throw new Error("Already waiting for low send backpressure");
         else return new Promise((res,rej) => {
             const resolver = (err?: Error) => {
-                this._resolveLowBackpressureWait = null;
+                this._cancelLowSendBackpressureWait = null;
                 if(err) {
-                    this._transport._cancelLowBackpressureWaiter(resolver);
+                    this._transport._cancelLowSendBackpressureWaiter(resolver);
                     rej(err);
                 }
                 else res();
             }
-            this._transport._addLowBackpressureWaiter(resolver);
+            this._transport._addLowSendBackpressureWaiter(resolver);
+            this._cancelLowSendBackpressureWait = resolver;
         });
     }
 
@@ -369,19 +370,19 @@ export default class WriteStream<B extends boolean = false> {
         ((data?: any, processComplexTypes?: boolean) => Promise<boolean>));
 
     private async _sendBinaryChunk(data: Uint8Array,end?: boolean) {
-        await this.waitForLowBackpressure();
+        await this.waitForLowSendBackpressure();
         this._sentSize += data.byteLength;
         this._transport._sendBinaryStreamChunk(this._id,data,end);
     }
 
     private async _sendObjectChunk(data: any, processComplexTypes?: boolean, end?: boolean) {
-        await this.waitForLowBackpressure();
+        await this.waitForLowSendBackpressure();
         this._sentSize += 1;
         this._transport._sendStreamChunk(this._id,data,processComplexTypes,end);
     }
 
     private async _sendStreamEnd() {
-        await this.waitForLowBackpressure();
+        await this.waitForLowSendBackpressure();
         this._transport._sendStreamEnd(this._id);
     }
 
@@ -436,8 +437,8 @@ export default class WriteStream<B extends boolean = false> {
         if(rmFromTransport) this._transport._removeWriteStream(this._id);
         if(this._resolveSizePermissionWait)
             this._resolveSizePermissionWait(new Error("Stream is closed."));
-        if(this._resolveLowBackpressureWait)
-            this._resolveLowBackpressureWait(new Error("Stream is closed."));
+        if(this._cancelLowSendBackpressureWait)
+            this._cancelLowSendBackpressureWait(new Error("Stream is closed."));
         this._closePromiseResolve(errorCode);
     }
 
