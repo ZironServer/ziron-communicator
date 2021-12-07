@@ -27,10 +27,10 @@ export function loadDefaults<T>(options: Partial<T>,defaults: T): T {
 }
 
 /**
- * Returns an approximation of the max UTF-8 string size.
+ * Estimates the max UTF-8 string size.
  * @param str
  */
-export function approximateMaxUTF8Size(str: string) {
+export function estimateMaxUTF8Size(str: string) {
     return str.length * 4;
 }
 

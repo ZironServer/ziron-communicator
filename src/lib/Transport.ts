@@ -65,7 +65,7 @@ export interface TransportOptions extends PackageBufferOptions {
     ackTimeout: number;
     /**
      * @description
-     * Defines a timeout in milliseconds for receiving
+     * Defines the timeout in milliseconds for receiving
      * the referenced binary content packet of a text packet.
      * @default 10000
      */
