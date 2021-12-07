@@ -405,7 +405,7 @@ export default class ReadStream<T = any> {
         }
     }
 
-    private async _chainNextChunk(chunk: Promise<any> | ArrayBuffer, type: DataType, size: number) {
+    private async _chainNextChunk(chunk: Promise<T> | ArrayBuffer, type: DataType, size: number) {
         if(this._chainCancel) return;
         await this._processChunk(chunk,type,size);
         this._chainChunkSize--;

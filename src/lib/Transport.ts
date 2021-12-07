@@ -177,6 +177,8 @@ export default class Transport {
         this.buffer = new PackageBuffer(this._send,() => this.open,options);
     }
 
+    private _processQueue: Promise<void> = Promise.resolve();
+
     /**
      * Can not be reset on connection lost
      * because packages with old ids can exist.
@@ -370,23 +372,29 @@ export default class Transport {
         switch (packet['0']) {
             case PacketType.Transmit:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
-                return this._processData(packet['2'],packet['3'],packet['4'])
-                    .then(data => this._processTransmit(packet['1'],data,packet['2']))
-                    .catch(this.onInvalidMessage);
+                return this._processData(packet['2'],packet['3'],packet['4'],(err,data) => {
+                    if(!err) this._processQueue = this._processQueue.then(() =>
+                        this._processTransmit(packet['1'],data,packet['2']));
+                    else this.onInvalidMessage(err);
+                });
             case PacketType.Invoke:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
-                return this._processData(packet['3'],packet['4'],packet['5'])
-                    .then(data => this._processInvoke(packet['1'],packet['2'],data,packet['3']))
-                    .catch(this.onInvalidMessage);
+                return this._processData(packet['3'],packet['4'],packet['5'],(err,data) => {
+                    if(!err) this._processQueue = this._processQueue.then(() =>
+                        this._processInvoke(packet['1'],packet['2'],data,packet['3']));
+                    else this.onInvalidMessage(err);
+                });
             case PacketType.InvokeDataResp:
                 const resp = this._invokeResponsePromises[packet['1']];
                 if (resp) {
                     clearTimeout(resp.timeout!);
                     delete this._invokeResponsePromises[packet['1']];
-                    return this._processData(packet['2'],packet['3'],packet['4'])
-                        .then(data => resp.resolve(resp.returnDataType ? [data,packet['2']] : data))
-                        .catch(this.onInvalidMessage);
+                    return this._processData(packet['2'],packet['3'],packet['4'], (err,data) => {
+                        if(!err) this._processQueue = this._processQueue.then(() =>
+                            resp.resolve(resp.returnDataType ? [data,packet['2']] : data));
+                        else this.onInvalidMessage(err);
+                    })
                 }
                 return;
             case PacketType.StreamChunk: return this._processJsonStreamChunk(packet['1'],packet['2'],packet['3'],packet['4']);
@@ -437,9 +445,12 @@ export default class Transport {
     private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any, binariesPacketId?: number) {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
-            if(containsStreams(dataType) && !this.options.chunksCanContainStreams)
-                throw new Error('Streams in chunks are not allowed.');
-            stream._pushChunk(this._processData(dataType,data,binariesPacketId),dataType);
+            stream._pushChunk(new Promise((res,rej) => {
+                if(containsStreams(dataType) && !this.options.chunksCanContainStreams)
+                    return rej(new Error('Streams in chunks are not allowed.'));
+                this._processData(dataType,data,binariesPacketId,
+                    (err,data) => err ? rej(err) : res(data));
+            }),dataType);
         }
     }
 
@@ -447,9 +458,12 @@ export default class Transport {
         const stream = this._activeReadStreams[streamId];
         if(stream) {
             if(typeof dataType === 'number') {
-                if(containsStreams(dataType) && !this.options.chunksCanContainStreams)
-                    throw new Error('Streams in chunks are not allowed.');
-                stream._pushChunk(this._processData(dataType,data,binariesPacketId),dataType);
+                stream._pushChunk(new Promise((res,rej) => {
+                    if(containsStreams(dataType) && !this.options.chunksCanContainStreams)
+                        return rej(new Error('Streams in chunks are not allowed.'));
+                    this._processData(dataType,data,binariesPacketId,
+                        (err,data) => err ? rej(err) : res(data));
+                }),dataType);
             }
             stream._end();
         }
@@ -537,32 +551,29 @@ export default class Transport {
         }
     }
 
-    private _processData(type: DataType, data: any, dataMetaInfo: any): Promise<any> {
-        if (type === DataType.JSON) return Promise.resolve(data);
+    private _processData(type: DataType, data: any, dataMetaInfo: any, callback: (err?: Error | null,data?: any) => void) {
+        if (type === DataType.JSON) return callback(null,data);
         else if (type === DataType.Binary) {
-            if(typeof data !== 'number') throw new Error('Invalid binary packet id.');
-            return new Promise((res,rej) => {
-                this._resolveBinaryContent(data,(err,binaries) => {
-                    err ? rej(err) : res(binaries![0])
-                });
-            })
+            if(typeof data !== 'number') callback(new Error('Invalid binary packet id.'));
+            this._resolveBinaryContent(data,(err,binaries) => {
+                err ? callback(err) : callback(null,binaries![0]);
+            });
         } else if (isMixedJSONDataType(type)) {
             const resolveOptions = {
                 parseStreams: this.options.streamsEnabled &&
                     (type === DataType.JSONWithStreams || type === DataType.JSONWithStreamsAndBinaries),
                 parseBinaries: type === DataType.JSONWithBinaries || type === DataType.JSONWithStreamsAndBinaries
             };
-            if(typeof dataMetaInfo === 'number') return new Promise((res,rej) => {
-                this._resolveBinaryContent(dataMetaInfo,(err, binaries) => {
-                    err ? rej(err) : res(this._resolveMixedJSONDeep(data,resolveOptions,binaries!));
-                })
+            if(typeof dataMetaInfo === 'number') return this._resolveBinaryContent(dataMetaInfo,
+                (err, binaries) => {
+                err ? callback(err) : callback(null,this._resolveMixedJSONDeep(data,resolveOptions,binaries!));
             })
-            else return Promise.resolve(this._resolveMixedJSONDeep(data,resolveOptions));
+            else return callback(null,this._resolveMixedJSONDeep(data,resolveOptions));
         } else if(type === DataType.Stream && this.options.streamsEnabled) {
-            if(typeof data !== 'number') throw new Error('Invalid stream id.');
-            return Promise.resolve(new this.options.readStream(data,this));
+            if(typeof data !== 'number') callback(new Error('Invalid stream id.'));
+            return callback(null,new this.options.readStream(data,this));
         }
-        else throw new Error('Invalid data type.');
+        else callback(new Error('Invalid data type.'));
     }
 
     private _resolveBinaryContent(binariesPacketId: number, callback: (error?: any,binaries?: ArrayBuffer[]) => void) {
