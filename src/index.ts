@@ -29,7 +29,7 @@ import StreamCloseError from "./lib/streams/StreamCloseError";
 import { Package } from "./lib/Package";
 import PackageBuffer, {PackageBufferOptions} from "./lib/PackageBuffer";
 import GroupTransport, {GroupTransportOptions} from "./lib/GroupTransport";
-import {escapeJSONString, MAX_SUPPORTED_ARRAY_BUFFER_SIZE} from "./lib/Utils";
+import {MAX_SUPPORTED_ARRAY_BUFFER_SIZE} from "./lib/Utils";
 
 export {
     Transport,
@@ -64,6 +64,5 @@ export {
     ComplexTypesOption,
     hydrateError,
     dehydrateError,
-    BackError,
-    escapeJSONString
+    BackError
 }

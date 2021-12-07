@@ -12,6 +12,7 @@ import ReadStream from "./streams/ReadStream";
 import WriteStream from "./streams/WriteStream";
 import {StreamErrorCloseCode} from "./streams/StreamErrorCloseCode";
 import {
+    escapeJSONString,
     escapePlaceholderSequence, loadDefaults,
     MAX_SUPPORTED_ARRAY_BUFFER_SIZE,
     RESOLVED_PROMISE,
@@ -767,6 +768,7 @@ export default class Transport {
      * @param processComplexTypes
      */
     prepareTransmit(receiver: string, data?: any, {processComplexTypes}: ComplexTypesOption = {}): Package {
+        receiver = escapeJSONString(receiver);
         if(!processComplexTypes) {
             return [PacketType.Transmit + ',"' + receiver + '",' +
             DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];
@@ -826,6 +828,7 @@ export default class Transport {
         {ackTimeout,processComplexTypes,returnDataType}: {ackTimeout?: number | null, returnDataType?: RDT} & ComplexTypesOption = {}
         ): InvokePackage<RDT extends true ? [any,DataType] : any>
     {
+        procedure = escapeJSONString(procedure);
         const callId = this._getNewCid();
         const pack: InvokePackage = [] as any;
 
@@ -1137,6 +1140,7 @@ export default class Transport {
      * @param processComplexTypes
      */
     public static prepareMultiTransmit(receiver: string, data?: any, {processComplexTypes}: ComplexTypesOption = {}): Package {
+        receiver = escapeJSONString(receiver);
         if(!processComplexTypes) {
             return [PacketType.Transmit + ',"' + receiver + '",' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : '')];

@@ -37,7 +37,7 @@ export function estimateMaxUTF8Size(str: string) {
 /**
  * @description
  * Escape a string for building JSON content.
- * It can be used to escape quotes from receiver/procedure names.
+ * It is used to escape quotes from receiver/procedure names.
  * @param str
  */
 export function escapeJSONString(str: string): string {
