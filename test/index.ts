@@ -226,6 +226,12 @@ describe('Ziron', () => {
         processComplexTypes: false
       },
       {
+        title: 'A should receive the response of invoke with quotes in the procedure name.',
+        procedure: 'Send"Message',
+        respData: "Hello World!",
+        expectedData: "Hello World!",
+        processComplexTypes: false
+      },
       {
         title: 'A should receive the response of invoke with binary data.',
         respData: new ArrayBuffer(200),
@@ -265,8 +271,8 @@ describe('Ziron', () => {
 
     it('A should receive the same invoked binary data as a response.', (done) => {
       const binary = new ArrayBuffer(200);
-      comB1.onInvoke = (event,data,end) => {
-        expect(event).to.be.equal('getSameBinary');
+      comB1.onInvoke = (procedure,data,end) => {
+        expect(procedure).to.be.equal('getSameBinary');
         end(data,true);
       };
       comA1.invoke('getSameBinary',binary,{processComplexTypes: true}).then(result => {
@@ -288,8 +294,8 @@ describe('Ziron', () => {
       })()
 
       const car = {avatar: new ArrayBuffer(20), model: 'X1', hp: 500, code: writeStream};
-      comB1.onInvoke = async (event,data,end) => {
-        expect(event).to.be.equal('car');
+      comB1.onInvoke = async (procedure,data,end) => {
+        expect(procedure).to.be.equal('car');
 
         expect(data.avatar).to.be.deep.equal(car.avatar);
         expect(data.model).to.be.equal(car.model);
@@ -312,8 +318,8 @@ describe('Ziron', () => {
     it('A should receive the response with MixedJSON data of an invoke.', (done) => {
       let tv;
       let writtenCode: any[];
-      comB1.onInvoke = (event,_,end) => {
-        expect(event).to.be.equal('tv');
+      comB1.onInvoke = (procedure,_,end) => {
+        expect(procedure).to.be.equal('tv');
 
         const writeStream = new WriteStream();
         (async () => {
@@ -341,8 +347,8 @@ describe('Ziron', () => {
     it('A should receive the err response of an invoke.', (done) => {
       const error = new Error('Some msg');
       error.name = 'SomeName';
-      comB1.onInvoke = (event,_data,_end,reject) => {
-        expect(event).to.be.equal('getErr');
+      comB1.onInvoke = (procedure,_data,_end,reject) => {
+        expect(procedure).to.be.equal('getErr');
         reject(error);
       };
       comA1.invoke('getErr').catch(err => {
@@ -352,7 +358,7 @@ describe('Ziron', () => {
       });
     });
 
-    it('A should receive a timeout error by an unknown event invoke.', (done) => {
+    it('A should receive a timeout error by an unknown procedure invoke.', (done) => {
       comB1.onInvoke = () => {};
       comA1.invoke('?',undefined,{ackTimeout: 50}).catch(err => {
         expect(err).to.be.instanceof(TimeoutError)
@@ -371,11 +377,11 @@ describe('Ziron', () => {
     });
 
     it('A should receive the invoke response with the data type.', (done) => {
-      comB1.onInvoke = (event,_data,end) => {
-        expect(event).to.be.equal('event2');
+      comB1.onInvoke = (procedure,_data,end) => {
+        expect(procedure).to.be.equal('procedure2');
         end({name: 'Leo'});
       };
-      comA1.invoke('event2',undefined,{returnDataType: true}).then(res => {
+      comA1.invoke('procedure2',undefined,{returnDataType: true}).then(res => {
         expect(res).to.be.deep.equal([{name: 'Leo'},DataType.JSON]);
         done();
       });
@@ -520,8 +526,8 @@ describe('Ziron', () => {
               .end(test.data[test.data.length - 1]);
         })();
 
-        comB1.onTransmit = async (event, data: ReadStream, type) => {
-          expect(event).to.be.equal('streamJson');
+        comB1.onTransmit = async (receiver, data: ReadStream, type) => {
+          expect(receiver).to.be.equal('streamJson');
           expect(type).to.be.equal(DataType.Stream);
           expect(data).to.be.instanceof(ReadStream);
 
@@ -554,8 +560,8 @@ describe('Ziron', () => {
         expect(code).to.be.equal(505);
         done();
       });
-      comB1.onTransmit = (event, data: ReadStream, type) => {
-        expect(event).to.be.equal('readStreamClose');
+      comB1.onTransmit = (receiver, data: ReadStream, type) => {
+        expect(receiver).to.be.equal('readStreamClose');
         expect(type).to.be.equal(DataType.Stream);
         expect(data).to.be.instanceof(ReadStream);
         data.close(505)
@@ -573,8 +579,8 @@ describe('Ziron', () => {
         write(i++)
       });
 
-      comB1.onTransmit = async (event, data: ReadStream, type) => {
-        expect(event).to.be.equal('readStreamClose');
+      comB1.onTransmit = async (receiver, data: ReadStream, type) => {
+        expect(receiver).to.be.equal('readStreamClose');
         expect(type).to.be.equal(DataType.Stream);
         expect(data).to.be.instanceof(ReadStream);
         data.accept();
@@ -592,8 +598,8 @@ describe('Ziron', () => {
         write(new ArrayBuffer(i++))
       });
 
-      comB1.onTransmit = async (event, data: ReadStream, type) => {
-        expect(event).to.be.equal('chunkMiddleware');
+      comB1.onTransmit = async (receiver, data: ReadStream, type) => {
+        expect(receiver).to.be.equal('chunkMiddleware');
         expect(type).to.be.equal(DataType.Stream);
         expect(data).to.be.instanceof(ReadStream);
 
@@ -619,8 +625,8 @@ describe('Ziron', () => {
         expect(code).to.be.equal(StreamErrorCloseCode.AcceptTimeout);
         done();
       });
-      comB1.onTransmit = (event,data: ReadStream) => {
-        expect(event).to.be.equal('streamAcceptTimeout');
+      comB1.onTransmit = (receiver,data: ReadStream) => {
+        expect(receiver).to.be.equal('streamAcceptTimeout');
       };
       comA1.transmit('streamAcceptTimeout',writeStream,{processComplexTypes: true});
     });
@@ -628,8 +634,8 @@ describe('Ziron', () => {
     it("An accept read stream which will not receive anything a certain time should end with chunk timeout.", (done) => {
       const writeStream = new WriteStream();
 
-      comB1.onTransmit = (event,data: ReadStream) => {
-        expect(event).to.be.equal('streamChunkTimeout');
+      comB1.onTransmit = (receiver,data: ReadStream) => {
+        expect(receiver).to.be.equal('streamChunkTimeout');
 
         data.closed.then((code) => {
           expect(code).to.be.equal(StreamErrorCloseCode.ChunkTimeout);
@@ -653,8 +659,8 @@ describe('Ziron', () => {
         done();
       });
 
-      comB1.onTransmit = (event,data: ReadStream) => {
-        expect(event).to.be.equal('sizePermissionTimeout');
+      comB1.onTransmit = (receiver,data: ReadStream) => {
+        expect(receiver).to.be.equal('sizePermissionTimeout');
         data.accept({
           bufferSize: 1,
         });
@@ -676,8 +682,8 @@ describe('Ziron', () => {
         done();
       });
 
-      comB1.onTransmit = (event,data: ReadStream) => {
-        expect(event).to.be.equal('endClosureTimeout');
+      comB1.onTransmit = (receiver,data: ReadStream) => {
+        expect(receiver).to.be.equal('endClosureTimeout');
         data.chunkMiddleware = async () => {
           //blocking processing
           await new Promise(r => setTimeout(r,200));
@@ -697,8 +703,8 @@ describe('Ziron', () => {
       const writeStreamObj = new WriteStream(false);
       const writeStreamBin = new WriteStream(true);
 
-      comB1.onTransmit = (event,data: ReadStream[]) => {
-        expect(event).to.be.equal('writeStreams');
+      comB1.onTransmit = (receiver,data: ReadStream[]) => {
+        expect(receiver).to.be.equal('writeStreams');
         data.forEach(stream => stream.accept());
       };
       comA1.transmit('writeStreams',[writeStreamObj,writeStreamBin],
@@ -718,8 +724,8 @@ describe('Ziron', () => {
 
       let dataCounter = 0;
 
-      comB1.onTransmit = (event,data: ReadStream[]) => {
-        expect(event).to.be.equal('writeStreams');
+      comB1.onTransmit = (receiver,data: ReadStream[]) => {
+        expect(receiver).to.be.equal('writeStreams');
         data.forEach(stream => {
           stream.accept();
           (async () => {
@@ -757,9 +763,9 @@ describe('Ziron', () => {
 
       let simulatedBadConnectionPromise;
 
-      comB1.onTransmit = async (event,data: ReadStream) => {
+      comB1.onTransmit = async (receiver,data: ReadStream) => {
         await simulatedBadConnectionPromise;
-        expect(event).to.be.equal('stream');
+        expect(receiver).to.be.equal('stream');
         expect(data).to.be.instanceOf(ReadStream);
         expect(data.state).to.be.equal(StreamState.Pending);
 
@@ -797,8 +803,8 @@ describe('Ziron', () => {
           done();
         });
 
-        comB1.onTransmit = (event,data: ReadStream) => {
-          expect(event).to.be.equal('streamSizeLimit');
+        comB1.onTransmit = (receiver,data: ReadStream) => {
+          expect(receiver).to.be.equal('streamSizeLimit');
           data.accept({sizeLimit: 2,bufferSize: 50});
         };
         comA1.transmit('streamSizeLimit',writeStream,{processComplexTypes: true});
@@ -815,7 +821,7 @@ describe('Ziron', () => {
 
     it('ReadAll method of a failure closed ReadStream should throw a StreamCloseError.', async () => {
       let readStream: ReadStream | null = null;
-      comB1.onTransmit = async (event,data: ReadStream) => {
+      comB1.onTransmit = async (receiver,data: ReadStream) => {
         readStream = data;
       };
       await comA1.transmit('stream',new WriteStream(),{processComplexTypes: true});
@@ -909,8 +915,8 @@ describe('Ziron', () => {
       const count = 43;
 
       let receivedI = 0;
-      comB1.onTransmit = (event,data) => {
-        expect(event).to.be.equal('batch');
+      comB1.onTransmit = (receiver,data) => {
+        expect(receiver).to.be.equal('batch');
         expect(data).to.be.equal('msg');
         receivedI++;
         if(receivedI === count) done();
@@ -929,8 +935,8 @@ describe('Ziron', () => {
       const dataLength = 211;
 
       let receivedI = 0;
-      comB1.onTransmit = (event,data) => {
-        expect(event).to.be.equal('batch');
+      comB1.onTransmit = (receiver,data) => {
+        expect(receiver).to.be.equal('batch');
         receivedI++;
         receivedMessages.push(data);
         if(receivedI === dataLength) {
@@ -991,11 +997,11 @@ describe('Ziron', () => {
         invalid: true
       },
       {
-        msg: '1,"someEvent",342',
+        msg: '1,"someReceiver",342',
         invalid: true
       },
       {
-        msg: '1,"someEvent",0',
+        msg: '1,"someReceiver",0',
         invalid: false
       },
       {
@@ -1007,11 +1013,11 @@ describe('Ziron', () => {
         invalid: true
       },
       {
-        msg: '1,"someEvent",1',
+        msg: '1,"someReceiver",1',
         invalid: true
       },
       {
-        msg: '1,"someEvent",2',
+        msg: '1,"someReceiver",2',
         invalid: true
       },
       {
@@ -1056,11 +1062,11 @@ describe('Ziron', () => {
         invalid: true
       },
       {
-        msg: '2,"someEvent",0,0',
+        msg: '2,"someProcedure",0,0',
         invalid: false
       },
       {
-        msg: '2,"someEvent","callIdWrong",0',
+        msg: '2,"someProcedure","callIdWrong",0',
         invalid: true
       },
     ].forEach((test, index) => {
@@ -1074,7 +1080,7 @@ describe('Ziron', () => {
             }
             catch(err) {rej(err)}
           }
-          comB1.onInvoke = (_event,_data,end) => {
+          comB1.onInvoke = (_procedure,_data,end) => {
             try{
               expect(test.invalid).to.be.false;
               end();
@@ -1104,16 +1110,16 @@ describe('Ziron', () => {
           err.name = 'SomeName';
           throw err;
         }
-        comA1.transmit('event');
+        comA1.transmit('receiver');
       })
     });
 
     it(`Using the same write stream multiple times should throw an error.`, () => {
       const stream = new WriteStream();
-      comA1.transmit('event',stream,{processComplexTypes: true});
+      comA1.transmit('receiver',stream,{processComplexTypes: true});
 
       expect(function () {
-        comA1.transmit('event',stream,{processComplexTypes: true})
+        comA1.transmit('receiver',stream,{processComplexTypes: true})
       }).to.throw(Error,'Write-stream already used.');
     });
 
@@ -1133,8 +1139,8 @@ describe('Ziron', () => {
       const count = 20;
 
       let receivedI = 0;
-      const receiver = (event,data) => {
-        expect(event).to.be.equal('group');
+      const receiver = (receiver,data) => {
+        expect(receiver).to.be.equal('group');
         expect(data).to.be.equal('msg');
         receivedI++;
         if(receivedI === (count * 2)) done();
@@ -1150,8 +1156,8 @@ describe('Ziron', () => {
       const data = {pic: new ArrayBuffer(10),code: new ArrayBuffer(30)};
 
       let receivedI = 0;
-      const receiver = (event,receivedData) => {
-        expect(event).to.be.equal('group');
+      const receiver = (receiver,receivedData) => {
+        expect(receiver).to.be.equal('group');
         expect(receivedData).to.be.deep.equal(data);
         receivedI++;
         if(receivedI === 2) done();
