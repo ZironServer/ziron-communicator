@@ -112,6 +112,14 @@ describe('Ziron', () => {
         processComplexTypes: true
       },
       {
+        title: 'B should receive the transmit with quotes in the receiver name.',
+        receiver: 'Send"Message',
+        data: "Hello World!",
+        expectedData: "Hello World!",
+        expectedDataType: DataType.JSON,
+        processComplexTypes: false
+      },
+      {
         title: 'B should receive the transmit with JSON string.',
         data: new JSONString('[]'),
         expectedData: [],
@@ -134,10 +142,11 @@ describe('Ziron', () => {
       }
     ].forEach(test => {
       it(test.title, async () => {
+        const receiver = test.receiver || 'someReceiver';
         const receivePromise = new Promise((res,rej) => {
-          comB1.onTransmit = (event,data,type) => {
+          comB1.onTransmit = (inReceiver,data,type) => {
             try {
-              expect(event).to.be.equal('someEvent');
+              expect(inReceiver).to.be.equal(receiver);
               expect(data).to.be.deep.equal(test.expectedData);
               expect(type).to.be.equal(test.expectedDataType);
               res();
@@ -145,7 +154,7 @@ describe('Ziron', () => {
             catch(e) {rej(e)}
           };
         });
-        comA1.transmit('someEvent', test.data, {processComplexTypes: test.processComplexTypes});
+        comA1.transmit(receiver, test.data, {processComplexTypes: test.processComplexTypes});
         await receivePromise;
       });
     })
@@ -157,6 +166,12 @@ describe('Ziron', () => {
       {
         title: 'B1 and B2 should receive the multi transmit with JSON data.',
         data: {name: 'Luca', age: 21},
+        processComplexTypes: false
+      },
+      {
+        title: 'B1 and B2 should receive the multi transmit with quotes in the receiver name.',
+        receiver: 'Send"Message',
+        data: "Hello World!",
         processComplexTypes: false
       },
       {
@@ -177,11 +192,12 @@ describe('Ziron', () => {
     ]
     .forEach(test => {
       it(test.title, async () => {
+        const receiver = test.receiver || 'someReceiver';
         const receivePromise = Promise.all([comB1,comB2].map(c => {
           return new Promise((res,rej) =>  {
-            c.onTransmit = (event,data) => {
+            c.onTransmit = (inReceiver,data) => {
               try {
-                expect(event).to.be.equal('person');
+                expect(inReceiver).to.be.equal(receiver);
                 expect(data).to.be.deep.equal(test.data);
                 res();
               }
@@ -190,7 +206,7 @@ describe('Ziron', () => {
           });
         }));
 
-        const prepPackage = Transport.prepareMultiTransmit('person',test.data,
+        const prepPackage = Transport.prepareMultiTransmit(receiver,test.data,
           {processComplexTypes: test.processComplexTypes});
         [comA1,comA2].forEach(c => c.sendPackage(prepPackage))
 
@@ -209,6 +225,7 @@ describe('Ziron', () => {
         expectedData: {name: 'Luca', age: 21},
         processComplexTypes: false
       },
+      {
       {
         title: 'A should receive the response of invoke with binary data.',
         respData: new ArrayBuffer(200),
@@ -235,11 +252,12 @@ describe('Ziron', () => {
       }
     ].forEach(test => {
       it(test.title, async () => {
-        comB1.onInvoke = (event,_,end) => {
-          expect(event).to.be.equal('someEvenet');
+        const procedure = test.procedure || 'someProcedure';
+        comB1.onInvoke = (inProcedure,_,end) => {
+          expect(inProcedure).to.be.equal(procedure);
           end(test.respData,test.processComplexTypes);
         };
-        return comA1.invoke('someEvenet').then(result => {
+        return comA1.invoke(procedure).then(result => {
           expect(result).to.be.deep.equal(test.expectedData);
         });
       });
