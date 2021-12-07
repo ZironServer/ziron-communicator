@@ -41,8 +41,8 @@ export function estimateMaxUTF8Size(str: string) {
  * @param str
  */
 export function escapeJSONString(str: string): string {
-    return str.replace(/[\\"']/g, '\\$&')
-        .replace(/\u0000/g, '\\0');
+    if(str.indexOf('"') === -1) return str;
+    return JSON.stringify(str).slice(1,-1);
 }
 
 /**
