@@ -78,6 +78,8 @@ describe('Ziron', () => {
       com.hasLowSendBackpressure = () => true;
       com.onTransmit = () => {};
       com.onInvoke = () => {};
+      com.options.limitBatchStringLength = 310000;
+      com.options.limitBatchBinarySize = 3145728;
       com.options.maxBufferChunkLength = 200;
       com.options.maxBufferSize = Number.POSITIVE_INFINITY;
     });
@@ -911,7 +913,7 @@ describe('Ziron', () => {
   });
 
   describe('Batching', () => {
-    it('All batch transmits should be received.', (done) => {
+    it('All text batch transmits should be received.', (done) => {
       const count = 43;
 
       let receivedI = 0;
@@ -926,6 +928,29 @@ describe('Ziron', () => {
       comA1.options.limitBatchStringLength = 2;
       for(let i = 0; i < count; i++){
         comA1.transmit('batch','msg',{batch: 50});
+      }
+    });
+
+    it('All binary batch transmits should be received.', (done) => {
+      const count = 83;
+
+      const sentData: any[] = [];
+      const receivedData: any[] = [];
+      comB1.onTransmit = (receiver,data) => {
+        expect(receiver).to.be.equal('batch');
+        receivedData.push(data);
+        if(receivedData.length === count) {
+          expect(receivedData).to.be.deep.equal(sentData);
+          done();
+        }
+      };
+
+      comA1.options.maxBufferChunkLength = 5;
+      comA1.options.limitBatchBinarySize = 40;
+      for(let i = 0; i < count; i++){
+        const data = new ArrayBuffer(i);
+        sentData.push(data);
+        comA1.transmit('batch',data,{processComplexTypes: true,batch: 50});
       }
     });
 
