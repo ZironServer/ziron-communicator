@@ -343,18 +343,14 @@ export default class Transport {
         const resolver = this._binaryContentResolver[id],
             byteLength = view.byteLength,
             binaries: ArrayBuffer[] = [];
-        let binaryLen: number;
+        let binaryLen: number | undefined = undefined;
         offset += 8;
 
         while(offset < byteLength) {
             binaryLen = view.getUint32(offset);
             offset += 4;
-            if(binaryLen === NEXT_BINARIES_PACKET_TOKEN) {
-                this._processBinaryContentPacket(view,offset);
-                break;
-            }
-            if(resolver)
-                binaries.push(view.buffer.slice(offset,offset + binaryLen));
+            if(binaryLen === NEXT_BINARIES_PACKET_TOKEN) break;
+            if(resolver) binaries.push(view.buffer.slice(offset,offset + binaryLen));
             offset += binaryLen;
         }
         if(resolver){
@@ -362,6 +358,7 @@ export default class Transport {
             clearTimeout(resolver.timeout);
             resolver.callback(null,binaries);
         }
+        if(binaryLen === NEXT_BINARIES_PACKET_TOKEN) this._processBinaryContentPacket(view,offset);
     }
 
     private _processTransmit(receiver: string,data: any,dataType: DataType) {
