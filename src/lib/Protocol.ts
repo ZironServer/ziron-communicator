@@ -7,6 +7,11 @@ Copyright(c) Ing. Luca Gian Scaringella
 import {DataType} from "./DataType";
 import {MAX_UINT_32} from "./Utils";
 
+export const PING_UINT8 = 57;
+export const PING = new Uint8Array([PING_UINT8]);
+export const PONG_UINT8 = 65;
+export const PONG = new Uint8Array([PONG_UINT8]);
+
 export const NEXT_BINARIES_PACKET_TOKEN = MAX_UINT_32;
 
 export const enum PacketType {

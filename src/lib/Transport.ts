@@ -4,7 +4,15 @@ GitHub: LucaCode
 Copyright(c) Ing. Luca Gian Scaringella
  */
 
-import {ActionPacket, BundlePacket, NEXT_BINARIES_PACKET_TOKEN, PacketType,} from "./Protocol";
+import {
+    ActionPacket,
+    BundlePacket,
+    NEXT_BINARIES_PACKET_TOKEN,
+    PacketType, PING,
+    PING_UINT8,
+    PONG,
+    PONG_UINT8,
+} from "./Protocol";
 import {containsStreams, DataType, isMixedJSONDataType, parseJSONDataType} from "./DataType";
 import {dehydrateError, hydrateError} from "./ErrorUtils";
 import {decodeJson, encodeJson, JSONString} from "./JsonUtils";
@@ -47,12 +55,6 @@ type BinaryContentResolver = {
     callback: (err?: Error | null,binaries?: ArrayBuffer[]) => void,
     timeout: NodeJS.Timeout
 };
-
-const PING = 57;
-const PING_BINARY = new Uint8Array([PING]);
-
-const PONG = 65;
-const PONG_BINARY = new Uint8Array([PONG]);
 
 export interface TransportOptions extends PackageBufferOptions {
     /**
@@ -233,11 +235,11 @@ export default class Transport {
         try {
             if(typeof rawMsg !== "string"){
                 if(rawMsg.byteLength === 1) {
-                    if((new Uint8Array(rawMsg))[0] === PING) {
+                    if((new Uint8Array(rawMsg))[0] === PING_UINT8) {
                         try {this.onPing();}
                         catch (err) {this.onListenerError(err)}
                     }
-                    else if((new Uint8Array(rawMsg))[0] === PONG) {
+                    else if((new Uint8Array(rawMsg))[0] === PONG_UINT8) {
                         try {this.onPong();}
                         catch (err) {this.onListenerError(err)}
                     }
@@ -973,13 +975,13 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     sendPing() {
-        try {this._send(PING_BINARY,true);}
+        try {this._send(PING,true);}
         catch (_) {}
     }
 
     // noinspection JSUnusedGlobalSymbols
     sendPong() {
-        try {this._send(PONG_BINARY,true);}
+        try {this._send(PONG,true);}
         catch (_) {}
     }
 
