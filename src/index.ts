@@ -32,12 +32,15 @@ import GroupTransport, {GroupTransportOptions} from "./lib/GroupTransport";
 import {MAX_SUPPORTED_ARRAY_BUFFER_SIZE, sendPackage} from "./lib/Utils";
 import {PING, PONG} from "./lib/Protocol";
 import {BatchOption, BatchOptionsValue, ComplexTypesOption, ResponseTimeoutOption, ReturnDataTypeOption} from "./lib/Options";
+import DynamicGroupTransport, {DynamicGroupTransportOptions} from "./lib/DynamicGroupTransport";
 
 export {
     Transport,
     TransportOptions,
     GroupTransport,
     GroupTransportOptions,
+    DynamicGroupTransport,
+    DynamicGroupTransportOptions,
     PackageBuffer,
     PackageBufferOptions,
     InsufficientBufferSizeError,

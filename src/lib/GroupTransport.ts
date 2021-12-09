@@ -18,6 +18,8 @@ export interface GroupTransportOptions extends PackageBufferOptions {}
  * Instead of using the transport prepareMultiTransmit method and sending the
  * package with each transporter, the batching is not individual for
  * each transport and shared for the group.
+ * If you want to manage multiple groups dynamically,
+ * you should look at the DynamicGroupTransport class.
  * When the underlying source has a temporarily disconnected state,
  * the buffer should be flushed on a reconnection.
  */
@@ -46,6 +48,8 @@ export default class GroupTransport {
              * Should return a boolean that indicates if the underlying source is completely connected.
              * When the underlying source does not have a disconnected state,
              * the function can always return true.
+             * Notice that you should flush the buffer on a reconnection
+             * when the underlying source has a disconnected state.
              */
             isConnected?: () => boolean
         } = {},
