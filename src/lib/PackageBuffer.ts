@@ -74,6 +74,12 @@ export default class PackageBuffer {
 
     constructor(
         public send: MultiSendFunction,
+        /**
+         * @description
+         * This function indicates if the underlying source is open.
+         * Notice that when this function returns false,
+         * it is important to flush the buffer when the source opens.
+         */
         public isOpen: () => boolean = () => true,
         /**
          * Notice that the provided options will not be cloned to save memory and performance.
