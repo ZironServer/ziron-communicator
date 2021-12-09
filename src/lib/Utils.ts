@@ -4,6 +4,8 @@ GitHub: LucaCode
 Copyright(c) Ing. Luca Gian Scaringella
  */
 
+import {Package} from "./Package";
+
 export const EMPTY_FUNCTION = () => {};
 
 export type Writable<T> = { -readonly [P in keyof T]: T[P] };
@@ -71,4 +73,14 @@ export function unescapePlaceholderSequence(key: string): string {
     if(key.indexOf("_") === -1) return key;
     return key.replace('__b','_b')
         .replace("__s","_s");
+}
+
+/**
+ * todo ..
+ * @param pack
+ * @param send
+ */
+export function sendPackage(pack: Package, send: SendFunction) {
+    send(pack[0]);
+    if(pack.length > 1) send(pack[1]!,true);
 }
