@@ -6,8 +6,8 @@ Copyright(c) Ing. Luca Gian Scaringella
 
 import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
 import {Package} from "./Package";
-import Transport, {ComplexTypesOption, InvokeListener, TransmitListener} from "./Transport";
-import {loadDefaults, MultiSendFunction, SendFunction} from "./Utils";
+import Transport from "./Transport";
+import {CorkFunction, loadDefaults, SendFunction} from "./Utils";
 import {BatchOption, ComplexTypesOption} from "./Options";
 
 export interface GroupTransportOptions extends PackageBufferOptions {}
@@ -26,7 +26,7 @@ export default class GroupTransport {
     public readonly buffer: PackageBuffer;
 
     public send: SendFunction;
-    public cork: (callback: () => void) => void;
+    public cork: CorkFunction;
     public isConnected: () => boolean;
 
     /**
@@ -40,7 +40,7 @@ export default class GroupTransport {
              * The send function should send the message to every socket of the group once.
              */
             send?: SendFunction
-            cork?: (callback: () => void) => void
+            cork?: CorkFunction
             /**
              * @description
              * Should return a boolean that indicates if the underlying source is completely connected.
@@ -93,6 +93,7 @@ export default class GroupTransport {
      * @param data
      * @param options
      */
+    transmit(receiver: string, data?: any, options: BatchOption & ComplexTypesOption = {}) {
         const pack = Transport.prepareMultiTransmit(receiver,data,options);
         if(!this.isConnected()) this.buffer.add(pack);
         else if(options.batch) this.buffer.add(pack,options.batch);

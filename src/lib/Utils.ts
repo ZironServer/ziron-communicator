@@ -12,6 +12,9 @@ export const RESOLVED_PROMISE = Object.freeze(Promise.resolve()) as Promise<void
 export const MAX_UINT_32 = 4294967295;
 export const MAX_SUPPORTED_ARRAY_BUFFER_SIZE = MAX_UINT_32 - 1;
 
+export type CorkFunction = (callback: () => void) => void;
+export type GroupCorkFunction = (group: string,callback: () => void) => void;
+
 export type SendFunction = (msg: ArrayBuffer | string, binary?: boolean, batch?: boolean) => void;
 export type MultiSendFunction = (messages: (ArrayBuffer | string)[],batches: boolean) => void;
 

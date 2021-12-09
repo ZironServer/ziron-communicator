@@ -20,6 +20,7 @@ import ReadStream from "./streams/ReadStream";
 import WriteStream from "./streams/WriteStream";
 import {StreamErrorCloseCode} from "./streams/StreamErrorCloseCode";
 import {
+    CorkFunction,
     escapeJSONString,
     escapePlaceholderSequence, loadDefaults,
     MAX_SUPPORTED_ARRAY_BUFFER_SIZE,
@@ -130,7 +131,7 @@ export default class Transport {
     public onPing: () => void;
     public onPong: () => void;
     public send: SendFunction;
-    public cork: (callback: () => void) => void;
+    public cork: CorkFunction;
 
     public hasLowSendBackpressure: () => boolean;
 
@@ -144,8 +145,8 @@ export default class Transport {
             onInvoke?: InvokeListener;
             onPing?: () => void;
             onPong?: () => void;
-            send?: (msg: string | ArrayBuffer) => void;
-            cork?: (callback: () => void) => void;
+            send?: SendFunction;
+            cork?: CorkFunction;
             /**
              * @description
              * The write streams will pause when the socket send backpressure is
