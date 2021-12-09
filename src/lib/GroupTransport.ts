@@ -8,6 +8,7 @@ import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
 import {Package} from "./Package";
 import Transport, {ComplexTypesOption, InvokeListener, TransmitListener} from "./Transport";
 import {loadDefaults, MultiSendFunction, SendFunction} from "./Utils";
+import {BatchOption, ComplexTypesOption} from "./Options";
 
 export interface GroupTransportOptions extends PackageBufferOptions {}
 
@@ -92,7 +93,6 @@ export default class GroupTransport {
      * @param data
      * @param options
      */
-    transmit(receiver: string, data?: any, options: {batch?: number | true | null} & ComplexTypesOption = {}) {
         const pack = Transport.prepareMultiTransmit(receiver,data,options);
         if(!this.isConnected()) this.buffer.add(pack);
         else if(options.batch) this.buffer.add(pack,options.batch);

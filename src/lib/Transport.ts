@@ -37,15 +37,13 @@ import {
 } from "./Errors";
 import {InvokePackage, Package} from "./Package";
 import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
-
-export interface ComplexTypesOption {
-    /**
-     * Complex types are streams or array buffer.
-     * If you want to send such types you need to activate this option.
-     * Otherwise, these types will be ignored because of performance reasons.
-     */
-    processComplexTypes?: boolean
-}
+import {
+    BatchOption,
+    BatchOptionsValue,
+    ComplexTypesOption,
+    ResponseTimeoutOption,
+    ReturnDataTypeOption
+} from "./Options";
 
 export type TransmitListener = (receiver: string, data: any, type: DataType) => void | Promise<void>;
 export type InvokeListener = (procedure: string, data: any, end: (data?: any, processComplexTypes?: boolean) => void,
@@ -61,11 +59,11 @@ export interface TransportOptions extends PackageBufferOptions {
      * @description
      * Defines the default timeout in milliseconds for
      * receiving the response of an invoke.
-     * Notice that an individual ack timeout can be specified for
+     * Notice that an individual response timeout can be specified for
      * an invoke that overrides this option value.
      * @default 10000
      */
-    ackTimeout: number;
+    responseTimeout: number;
     /**
      * @description
      * Defines the timeout in milliseconds for receiving
@@ -106,7 +104,7 @@ export default class Transport {
 
     public static readonly DEFAULT_OPTIONS: Readonly<TransportOptions> = {
         readStream: ReadStream,
-        ackTimeout: 10000,
+        responseTimeout: 10000,
         binaryContentPacketTimeout: 10000,
         streamsPerPackageLimit: 20,
         streamsEnabled: true,
@@ -835,14 +833,14 @@ export default class Transport {
      * It should not contain double-quotes.
      * To be sure, you can use the escapeJSONString function.
      * @param data
-     * @param ackTimeout
+     * @param responseTimeout
      * @param processComplexTypes
      * @param returnDataType
      */
     prepareInvoke<RDT extends true | false | undefined>(
         procedure: string,
         data?: any,
-        {ackTimeout,processComplexTypes,returnDataType}: {ackTimeout?: number | null, returnDataType?: RDT} & ComplexTypesOption = {}
+        {responseTimeout,processComplexTypes,returnDataType}: ResponseTimeoutOption & ComplexTypesOption & ReturnDataTypeOption<RDT> = {}
         ): InvokePackage<RDT extends true ? [any,DataType] : any>
     {
         procedure = escapeJSONString(procedure);
@@ -856,7 +854,7 @@ export default class Transport {
                     this._invokeResponsePromises[callId].timeout = setTimeout(() => {
                         delete this._invokeResponsePromises[callId];
                         reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
-                    }, ackTimeout || this.options.ackTimeout);
+                    }, responseTimeout || this.options.responseTimeout);
                 }
             });
             pack[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
@@ -875,7 +873,7 @@ export default class Transport {
                         this._invokeResponsePromises[callId].timeout = setTimeout(() => {
                             delete this._invokeResponsePromises[callId];
                             reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
-                        }, ackTimeout || this.options.ackTimeout);
+                        }, responseTimeout || this.options.responseTimeout);
                 }
             });
 
@@ -936,14 +934,14 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    sendPackage(pack: Package, batch?: number | true | null): void {
+    sendPackage(pack: Package, batch?: BatchOptionsValue): void {
         if(!this.open) this.buffer.add(pack);
         else if(batch) this.buffer.add(pack,batch);
         else this._directSendPackage(pack);
     }
 
     // noinspection JSUnusedGlobalSymbols
-    sendPackageWithPromise(pack: Package, batch?: number | true | null): Promise<void> {
+    sendPackageWithPromise(pack: Package, batch?: BatchOptionsValue): Promise<void> {
         if(batch) {
             return new Promise((resolve) => {
                 const tmpAfterSend = pack._afterSend;
@@ -966,8 +964,8 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    invoke<RDT extends true | false | undefined>(procedure: string, data?: any, options:
-        {ackTimeout?: number, batch?: number | true | null,returnDataType?: RDT} & ComplexTypesOption = {}):
+    invoke<RDT extends true | false | undefined>(procedure: string, data?: any, options: ResponseTimeoutOption &
+        ComplexTypesOption & BatchOption & ReturnDataTypeOption<RDT> = {}):
         Promise<RDT extends true ? [any,DataType] : any>
     {
         const prePackage = this.prepareInvoke(procedure,data,options);
@@ -976,7 +974,7 @@ export default class Transport {
     }
 
     // noinspection JSUnusedGlobalSymbols
-    transmit(receiver: string, data?: any, options: {batch?: number | true | null} & ComplexTypesOption = {}) {
+    transmit(receiver: string, data?: any, options: BatchOption & ComplexTypesOption = {}) {
         this.sendPackage(this.prepareTransmit(receiver,data,options),options.batch);
     }
 

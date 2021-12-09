@@ -9,7 +9,7 @@ import WriteStream from "./lib/streams/WriteStream";
 import Transport, {
     TransmitListener,
     InvokeListener,
-    ComplexTypesOption, TransportOptions
+    TransportOptions
 } from "./lib/Transport";
 import ReadStream, {ChunkMiddleware} from "./lib/streams/ReadStream";
 import {StreamErrorCloseCode} from "./lib/streams/StreamErrorCloseCode";
@@ -31,6 +31,7 @@ import PackageBuffer, {PackageBufferOptions} from "./lib/PackageBuffer";
 import GroupTransport, {GroupTransportOptions} from "./lib/GroupTransport";
 import {MAX_SUPPORTED_ARRAY_BUFFER_SIZE} from "./lib/Utils";
 import {PING, PONG} from "./lib/Protocol";
+import {BatchOption, BatchOptionsValue, ComplexTypesOption, ResponseTimeoutOption, ReturnDataTypeOption} from "./lib/Options";
 
 export {
     Transport,
@@ -63,6 +64,10 @@ export {
     InvokeListener,
     Package,
     ComplexTypesOption,
+    BatchOption,
+    BatchOptionsValue,
+    ResponseTimeoutOption,
+    ReturnDataTypeOption,
     hydrateError,
     dehydrateError,
     BackError,
