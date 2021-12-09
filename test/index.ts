@@ -365,7 +365,7 @@ describe('Ziron', () => {
 
     it('A should receive a timeout error by an unknown procedure invoke.', (done) => {
       comB1.onInvoke = () => {};
-      comA1.invoke('?',undefined,{ackTimeout: 50}).catch(err => {
+      comA1.invoke('?',undefined,{responseTimeout: 50}).catch(err => {
         expect(err).to.be.instanceof(TimeoutError)
         done();
       });
