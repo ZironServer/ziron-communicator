@@ -30,6 +30,7 @@ import { Package } from "./lib/Package";
 import PackageBuffer, {PackageBufferOptions} from "./lib/PackageBuffer";
 import GroupTransport, {GroupTransportOptions} from "./lib/GroupTransport";
 import {MAX_SUPPORTED_ARRAY_BUFFER_SIZE} from "./lib/Utils";
+import {PING, PONG} from "./lib/Protocol";
 
 export {
     Transport,
@@ -64,5 +65,7 @@ export {
     ComplexTypesOption,
     hydrateError,
     dehydrateError,
-    BackError
+    BackError,
+    PING,
+    PONG
 }
