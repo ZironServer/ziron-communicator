@@ -67,6 +67,11 @@ export interface PackageBufferOptions {
  */
 export default class PackageBuffer {
 
+    /**
+     * @internal
+     */
+    public afterFlush?: () => void;
+
     constructor(
         public send: MultiSendFunction,
         public isOpen: () => boolean = () => true,
@@ -253,6 +258,7 @@ export default class PackageBuffer {
             for (let i = 0,len = packages.length; i < len; i += chunkLength)
                 this._sendBufferChunk(packages.slice(i, i + chunkLength))
         }
+        if(this.afterFlush) this.afterFlush();
     }
 
     private _sendBufferChunk(packages: Package[]) {
