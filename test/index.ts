@@ -37,10 +37,13 @@ const comB2 = new Transport({
   onListenerError: (err) => console.error('B2: Listener err: ', err),
 },{...Transport.DEFAULT_OPTIONS},true);
 
-const comBGroup = new GroupTransport((msg) => {
-  comB1.emitMessage(msg);
-  comB2.emitMessage(msg);
-}, () => comB1.open && comB2.open);
+const comBGroup = new GroupTransport({
+  send: (msg) => {
+    comB1.emitMessage(msg);
+    comB2.emitMessage(msg);
+  },
+  isConnected: () => comB1.open && comB2.open
+});
 
 //connect
 comA1.send = comB1.emitMessage.bind(comB1);
