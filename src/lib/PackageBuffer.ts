@@ -6,7 +6,7 @@ Copyright(c) Ing. Luca Gian Scaringella
 
 import {NEXT_BINARIES_PACKET_TOKEN, PacketType} from "./Protocol";
 import {Package} from "./Package";
-import {estimateMaxUTF8Size, loadDefaults, SendFunction} from "./Utils";
+import {estimateMaxUTF8Size, loadDefaults, MultiSendFunction} from "./Utils";
 import {InsufficientBufferSizeError} from "./Errors";
 
 export interface PackageBufferOptions {
@@ -68,7 +68,7 @@ export interface PackageBufferOptions {
 export default class PackageBuffer {
 
     constructor(
-        public send: SendFunction,
+        public send: MultiSendFunction,
         public isOpen: () => boolean = () => true,
         /**
          * Notice that the provided options will not be cloned to save memory and performance.
@@ -256,11 +256,8 @@ export default class PackageBuffer {
     }
 
     private _sendBufferChunk(packages: Package[]) {
-        const batchPackage = this._batchCompress(packages),
-            listLength = packages.length,
-            batch = batchPackage.length < packages.length;
-        for(let i = 0; i < batchPackage.length; i++) this.send(batchPackage[i],
-            typeof batchPackage[i] === 'object',batch);
+        const batchPackage = this._batchCompress(packages), listLength = packages.length;
+        this.send(batchPackage,batchPackage.length < packages.length);
         for(let i = 0; i < listLength; i++) if(packages[i]._afterSend) packages[i]._afterSend!();
     }
 

@@ -6,8 +6,8 @@ Copyright(c) Ing. Luca Gian Scaringella
 
 import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
 import {Package} from "./Package";
-import Transport, {ComplexTypesOption} from "./Transport";
-import {loadDefaults, SendFunction} from "./Utils";
+import Transport, {ComplexTypesOption, InvokeListener, TransmitListener} from "./Transport";
+import {loadDefaults, MultiSendFunction, SendFunction} from "./Utils";
 
 export interface GroupTransportOptions extends PackageBufferOptions {}
 
@@ -24,24 +24,40 @@ export default class GroupTransport {
 
     public readonly buffer: PackageBuffer;
 
+    public send: SendFunction;
+    public cork: (callback: () => void) => void;
+    public isConnected: () => boolean;
+
     /**
-     * @param send
-     * The send function should send the message to every socket of the group once.
-     * @param isConnected
-     * Should return a boolean that indicates if the underlying source is completely connected.
-     * When the underlying source does not have a disconnected state,
-     * the function can always return true.
+     * @param connector
      * @param options
      */
     constructor(
-        public readonly send: SendFunction,
-        public readonly isConnected: () => boolean = () => true,
+        connector: {
+            /**
+             * @description
+             * The send function should send the message to every socket of the group once.
+             */
+            send?: SendFunction
+            cork?: (callback: () => void) => void
+            /**
+             * @description
+             * Should return a boolean that indicates if the underlying source is completely connected.
+             * When the underlying source does not have a disconnected state,
+             * the function can always return true.
+             */
+            isConnected?: () => boolean
+        } = {},
         /**
          * Notice that the provided options will not be cloned to save memory and performance.
          */
         public options: GroupTransportOptions = {...GroupTransport.DEFAULT_OPTIONS}
     ) {
-        this.buffer = new PackageBuffer(this.send,isConnected,options);
+        this.send = connector.send || (() => {});
+        this.cork = connector.cork || (cb => cb());
+        this.isConnected = connector.isConnected || (() => true);
+        this.buffer = new PackageBuffer(this._multiSend.bind(this),
+            () => this.isConnected(),options);
     }
 
     public static readonly DEFAULT_OPTIONS: Readonly<GroupTransportOptions> = PackageBuffer.DEFAULT_OPTIONS;
@@ -50,10 +66,21 @@ export default class GroupTransport {
         return loadDefaults(options,GroupTransport.DEFAULT_OPTIONS);
     }
 
+    private _multiSend(messages: (string | ArrayBuffer)[],batches: boolean) {
+        const len = messages.length;
+        if(len > 1) this.cork(() => {
+            for(let i = 0; i < len; i++)
+                this.send(messages[i],typeof messages[i] === 'object',batches);
+        });
+        else if(len === 1) this.send(messages[0],typeof messages[0] === 'object',batches);
+    }
+
     private _directSendMultiTransmit(pack: Package) {
-        this.send(pack[0]);
-        if(pack.length > 1)
-            this.send(pack[1]!,true);
+        if(pack.length > 1) this.cork(() => {
+            this.send(pack[0]);
+            this.send(pack[1]!, true);
+        })
+        else this.send(pack[0]);
         if(pack._afterSend) pack._afterSend();
     }
 

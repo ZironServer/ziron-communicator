@@ -131,14 +131,9 @@ export default class Transport {
     public onInvoke: InvokeListener;
     public onPing: () => void;
     public onPong: () => void;
-    private _send: SendFunction;
-    public set send(value: SendFunction) {
-        this._send = value;
-        this.buffer.send = value;
-    }
-    public get send(): SendFunction {
-        return this._send;
-    }
+    public send: SendFunction;
+    public cork: (callback: () => void) => void;
+
     public hasLowSendBackpressure: () => boolean;
 
     public readonly badConnectionTimestamp: number = -1;
@@ -152,6 +147,7 @@ export default class Transport {
             onPing?: () => void;
             onPong?: () => void;
             send?: (msg: string | ArrayBuffer) => void;
+            cork?: (callback: () => void) => void;
             /**
              * @description
              * The write streams will pause when the socket send backpressure is
@@ -173,10 +169,12 @@ export default class Transport {
         this.onInvoke = connector.onInvoke || (() => {});
         this.onPing = connector.onPing || (() => {});
         this.onPong = connector.onPong || (() => {});
-        this._send = connector.send || (() => {});
+        this.send = connector.send || (() => {});
+        this.cork = connector.cork || (cb => cb());
         this.hasLowSendBackpressure = connector.hasLowSendBackpressure || (() => true);
         this.open = connected;
-        this.buffer = new PackageBuffer(this._send,() => this.open,options);
+        this.buffer = new PackageBuffer(this._multiSend.bind(this),
+            () => this.open,options);
     }
 
     private _processQueue: Promise<void> = Promise.resolve();
@@ -213,6 +211,15 @@ export default class Transport {
     public readonly open: boolean = true;
 
     private readonly _lowSendBackpressureWaiters: (() => void)[] = [];
+
+    private _multiSend(messages: (string | ArrayBuffer)[],batches: boolean) {
+        const len = messages.length;
+        if(len > 1) this.cork(() => {
+            for(let i = 0; i < len; i++)
+                this.send(messages[i],typeof messages[i] === 'object',batches);
+        });
+        else if(len === 1) this.send(messages[0],typeof messages[0] === 'object',batches);
+    }
 
     /**
      * @internal
@@ -498,7 +505,7 @@ export default class Transport {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
                 if(badConnectionTimestamp !== this.badConnectionTimestamp) return;
-                this._send(PacketType.InvokeErrResp + ',' +
+                this.send(PacketType.InvokeErrResp + ',' +
                     callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err))));
             },dataType);
         }
@@ -514,21 +521,23 @@ export default class Transport {
      */
     private _sendInvokeDataResp(callId: number, data: any, processComplexTypes?: boolean) {
         if(!processComplexTypes) {
-            this._send(PacketType.InvokeDataResp + ',' + callId + ',' +
+            this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
         else if(data instanceof WriteStream && this.options.streamsEnabled){
             const streamId = this._getNewStreamId(data.binary);
-            this._send(PacketType.InvokeDataResp + ',' + callId + ',' +
+            this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
                 DataType.Stream + ',' + streamId);
             data._init(this,streamId);
             data._onTransmitted();
         }
         else if(data instanceof ArrayBuffer) {
             const binaryContentPacketId = this._getNewBinaryContentPacketId();
-            this._send(PacketType.InvokeDataResp + ',' + callId + ',' +
-                DataType.Binary + ',' + binaryContentPacketId);
-            this._send(Transport._createBinaryContentPacket(binaryContentPacketId,data),true);
+            this.cork(() => {
+                this.send(PacketType.InvokeDataResp + ',' + callId + ',' +
+                    DataType.Binary + ',' + binaryContentPacketId);
+                this.send(Transport._createBinaryContentPacket(binaryContentPacketId,data),true);
+            })
         }
         else {
             const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
@@ -545,11 +554,9 @@ export default class Transport {
                 pack[0] += "," + binaryContentPacketId;
                 pack[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
             }
-            if(streams.length > 0)
-                pack._afterSend = () => {for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();}
 
-            this._send(pack[0]);
-            if(pack.length > 1) this._send(pack[1]!, true);
+            this._silentDirectSendPackage(pack);
+            if(streams.length > 0) for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();
         }
     }
 
@@ -975,19 +982,30 @@ export default class Transport {
 
     // noinspection JSUnusedGlobalSymbols
     sendPing() {
-        try {this._send(PING,true);}
+        try {this.send(PING,true);}
         catch (_) {}
     }
 
     // noinspection JSUnusedGlobalSymbols
     sendPong() {
-        try {this._send(PONG,true);}
+        try {this.send(PONG,true);}
         catch (_) {}
     }
 
+    private _silentDirectSendPackage(pack: Package) {
+        if(pack.length > 1) this.cork(() => {
+            this.send(pack[0]);
+            this.send(pack[1]!, true);
+        })
+        else this.send(pack[0]);
+    }
+
     private _directSendPackage(pack: Package) {
-        this._send(pack[0])
-        if(pack.length > 1) this._send(pack[1]!,true);
+        if(pack.length > 1) this.cork(() => {
+            this.send(pack[0]);
+            this.send(pack[1]!, true);
+        })
+        else this.send(pack[0]);
         if(pack._afterSend) pack._afterSend();
     }
 
@@ -1003,18 +1021,18 @@ export default class Transport {
      */
     _sendStreamChunk(streamId: number, data: any, processComplexTypes?: boolean, end?: boolean) {
         if(!processComplexTypes) {
-            this._send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
+            this.send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
         else if(this.options.chunksCanContainStreams && data instanceof WriteStream){
             const streamId = this._getNewStreamId(data.binary);
-            this._send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
+            this.send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.Stream + ',' + streamId);
             data._init(this,streamId);
             data._onTransmitted();
         }
         else if(data instanceof ArrayBuffer)
-            this._send(Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),end),true);
+            this.send(Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),end),true);
         else {
             const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
             data = this._processMixedJSONDeep(data,binaries,streams);
@@ -1031,9 +1049,8 @@ export default class Transport {
                 pack[1] = Transport._createBinaryContentPacket(binaryContentPacketId,binaries);
             }
 
-            this._send(pack[0]);
-            if(pack.length > 1) this._send(pack[1]!,true);
-            for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();
+            this._silentDirectSendPackage(pack);
+            if(streams.length > 0) for(let i = 0; i < streams.length; i++) streams[i]._onTransmitted();
         }
     }
 
@@ -1044,7 +1061,7 @@ export default class Transport {
      * packet directly (faster than using _sendStreamChunk).
      */
     _sendBinaryStreamChunk(streamId: number, binaryPart: Uint8Array, end?: boolean) {
-        this._send(Transport._createBinaryStreamChunkPacket(streamId,binaryPart,end),true)
+        this.send(Transport._createBinaryStreamChunkPacket(streamId,binaryPart,end),true)
     }
 
     /**
@@ -1054,7 +1071,7 @@ export default class Transport {
      * @param streamId
      */
     _sendStreamEnd(streamId: number) {
-        this._send(PacketType.StreamEnd + ',' + streamId);
+        this.send(PacketType.StreamEnd + ',' + streamId);
     }
 
     private static _createBinaryStreamChunkPacket(streamId: number, binary: Uint8Array, end?: boolean): ArrayBuffer {
@@ -1073,7 +1090,7 @@ export default class Transport {
      * @private
      */
     _sendStreamAccept(streamId: number,allowedSize: number) {
-        this._send(PacketType.StreamAccept + ',' + streamId + ',' + allowedSize);
+        this.send(PacketType.StreamAccept + ',' + streamId + ',' + allowedSize);
     }
 
     /**
@@ -1084,7 +1101,7 @@ export default class Transport {
      * @private
      */
     _sendStreamAllowMore(streamId: number,allowedSize: number) {
-        this._send(PacketType.StreamDataPermission + ',' + streamId + ',' + allowedSize);
+        this.send(PacketType.StreamDataPermission + ',' + streamId + ',' + allowedSize);
     }
 
     /**
@@ -1095,7 +1112,7 @@ export default class Transport {
      * @private
      */
     _sendReadStreamClose(streamId: number, errorCode?: number) {
-        this._send(PacketType.ReadStreamClose + ',' + streamId +
+        this.send(PacketType.ReadStreamClose + ',' + streamId +
             (errorCode != null ? (',' + errorCode) : ''));
     }
 
@@ -1107,7 +1124,7 @@ export default class Transport {
      * @private
      */
     _sendWriteStreamClose(streamId: number, errorCode: number) {
-        this._send(PacketType.WriteStreamClose + ',' + streamId + ',' + errorCode);
+        this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + errorCode);
     }
 
     /**
