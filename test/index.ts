@@ -2,7 +2,7 @@ import {
   analyseTypeofData,
   BadConnectionError,
   BadConnectionType,
-  DataType, GroupTransport, InsufficientBufferSizeError,
+  DataType, DynamicGroupTransport, GroupTransport, InsufficientBufferSizeError,
   JSONString,
   Package,
   ReadStream,
@@ -43,6 +43,20 @@ const comBGroup = new GroupTransport({
     comB2.emitMessage(msg);
   },
   isConnected: () => comB1.open && comB2.open
+});
+
+const dynamicGroup = new DynamicGroupTransport({
+  send: ((group, msg) => {
+    if(group === 'A') {
+      comA1.emitMessage(msg);
+      comA2.emitMessage(msg);
+    }
+    else if(group === "B"){
+      comB1.emitMessage(msg);
+      comB2.emitMessage(msg);
+    }
+  }),
+  isConnected: () => true
 });
 
 //connect
@@ -86,6 +100,9 @@ describe('Ziron', () => {
       com.options.maxBufferChunkLength = 200;
       com.options.maxBufferSize = Number.POSITIVE_INFINITY;
     });
+    comBGroup.options.limitBatchStringLength = 310000;
+    dynamicGroup.options.limitBatchStringLength = 310000;
+    dynamicGroup.options.freeBufferMaxPoolSize = 100;
   })
 
   describe('Transmits', () => {
@@ -1163,37 +1180,108 @@ describe('Ziron', () => {
 
   describe('GroupTransport (Utility)', () => {
 
-    it(`Should correctly send multiple transmits to all underlying transporters with Batching.`, (done) => {
-      const count = 20;
-
-      let receivedI = 0;
-      const receiver = (receiver,data) => {
-        expect(receiver).to.be.equal('group');
-        expect(data).to.be.equal('msg');
-        receivedI++;
-        if(receivedI === (count * 2)) done();
+    [
+      {
+        data: 'msg',
+        batch: 50
+      },
+      {
+        data: {pic: new ArrayBuffer(10),code: new ArrayBuffer(30)},
+        processComplexTypes: true
+      },
+      {
+        data: new ArrayBuffer(10),
+        processComplexTypes: true,
+        batch: 20
       }
-      comB1.onTransmit = receiver;
-      comB2.onTransmit = receiver;
+    ].forEach((test, index) => {
 
-      for(let i = 0; i < count; i++)
-        comBGroup.transmit('group','msg',{batch: 50});
+      it(`Should correctly send multiple transmits to all underlying transporters: ${index}`, (done) => {
+        comBGroup.options.limitBatchStringLength = 50;
+
+        const count = 20;
+
+        let receivedI = 0;
+        const receiver = (receiver,data) => {
+          expect(receiver).to.be.equal('group');
+          expect(data).to.be.deep.equal(test.data);
+          receivedI++;
+          if(receivedI === (count * 2)) done();
+        }
+        comB1.onTransmit = receiver;
+        comB2.onTransmit = receiver;
+
+        for(let i = 0; i < count; i++)
+          comBGroup.transmit('group',test.data,{
+            batch: test.batch,
+            processComplexTypes: test.processComplexTypes
+          });
+      });
     });
 
-    it(`Should correctly send transmit to all underlying sources.`, (done) => {
-      const data = {pic: new ArrayBuffer(10),code: new ArrayBuffer(30)};
+  });
 
-      let receivedI = 0;
-      const receiver = (receiver,receivedData) => {
-        expect(receiver).to.be.equal('group');
-        expect(receivedData).to.be.deep.equal(data);
-        receivedI++;
-        if(receivedI === 2) done();
+  describe('DynamicGroupTransport (Utility)', () => {
+
+    [
+      {
+        data: 'msg',
+        batch: 50,
+        limitBatchStringLength: Number.POSITIVE_INFINITY
+      },
+      {
+        data: 'msg',
+      },
+      {
+        data: {pic: new ArrayBuffer(10),code: new ArrayBuffer(30)},
+        processComplexTypes: true
+      },
+      {
+        data: new ArrayBuffer(10),
+        processComplexTypes: true,
+        batch: 20
+      },
+      {
+        data: {name: 'Name',pic: new ArrayBuffer(20),code: new ArrayBuffer(5)},
+        processComplexTypes: true,
+        batch: 200
       }
-      comB1.onTransmit = receiver;
-      comB2.onTransmit = receiver;
+    ].forEach((test, index) => {
 
-      comBGroup.transmit('group',data,{processComplexTypes: true});
+      it(`Should correctly send multiple transmits to different groups: ${index}`, (done) => {
+        dynamicGroup.options.limitBatchStringLength = test.limitBatchStringLength || 60;
+        dynamicGroup.options.maxBufferChunkLength = Number.POSITIVE_INFINITY;
+        dynamicGroup.options.freeBufferMaxPoolSize = 1;
+
+        const aCount = 260;
+        const bCount = 150;
+
+        let received = 0;
+        const createReceiver = (expectedReceiver: string) => {
+          return (receiver,data) => {
+            expect(receiver).to.be.equal(expectedReceiver);
+            expect(data).to.be.deep.equal(test.data);
+            received++;
+            if(received === aCount * 2 + bCount * 2) done();
+          }
+        }
+        const aReceiver = createReceiver("SendMessageA");
+        const bReceiver = createReceiver("SendMessageB");
+        comB1.onTransmit = bReceiver;
+        comB2.onTransmit = bReceiver;
+        comA1.onTransmit = aReceiver;
+        comA2.onTransmit = aReceiver;
+
+        const options = {
+          batch: test.batch,
+          processComplexTypes: test.processComplexTypes
+        };
+
+        for(let i = 0; i < aCount; i++)
+          dynamicGroup.transmit("A",'SendMessageA',test.data,options);
+        for(let i = 0; i < bCount; i++)
+          dynamicGroup.transmit("B",'SendMessageB',test.data,options);
+      });
     });
   });
 
