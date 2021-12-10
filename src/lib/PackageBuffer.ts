@@ -177,8 +177,10 @@ export default class PackageBuffer {
             }
             else throw new InsufficientBufferSizeError("PackageBuffer");
         }
-        else this._pushToBuffer(pack);
-        if(typeof batch === "number") this._setBatchTime(batch);
+        else {
+            this._pushToBuffer(pack);
+            if(typeof batch === "number") this._setBatchTime(batch);
+        }
     }
 
     /**
