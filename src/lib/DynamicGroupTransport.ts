@@ -21,6 +21,7 @@ export interface DynamicGroupTransportOptions extends PackageBufferOptions {
 }
 
 const FREE_BUFFER_SEND_PLACEHOLDER = () => {throw new Error("Can not send from an unused buffer.");};
+const ALWAYS_OPEN = () => true;
 
 /**
  * @description
@@ -31,14 +32,14 @@ const FREE_BUFFER_SEND_PLACEHOLDER = () => {throw new Error("Can not send from a
  * the batching is not individual for each transport and shared for a group.
  * This class dynamically manages multiple groups with buffers instead of
  * the GroupTransport class with only represents a single group.
- * All buffers should be flushed on a reconnection when the
- * underlying source has a temporarily disconnected state.
+ * The group buffer should be tried to flush on reconnection of
+ * the underlying group source when the source has a temporarily disconnected state.
  */
 export default class DynamicGroupTransport {
 
     public send: GroupSendFunction;
     public cork: GroupCorkFunction;
-    public isConnected: () => boolean;
+    public isConnected: (group: string) => boolean;
 
     /**
      * @param connector
@@ -54,13 +55,13 @@ export default class DynamicGroupTransport {
             cork?: GroupCorkFunction
             /**
              * @description
-             * Should return a boolean that indicates if the underlying source is completely connected.
+             * Should return a boolean that indicates if the underlying group source is completely connected.
              * When the underlying source does not have a disconnected state,
              * the function can always return true.
-             * Notice that you should flush all buffers on a reconnection
-             * when the underlying source has a disconnected state.
+             * Notice that you should try to flush the group buffer on reconnection of
+             * the group underlying source when the source has a temporarily disconnected state.
              */
-            isConnected?: () => boolean
+            isConnected?: (group: string) => boolean
         } = {},
         /**
          * Notice that the provided options will not be cloned to save memory and performance.
@@ -90,12 +91,12 @@ export default class DynamicGroupTransport {
             if(this._freeBuffers.length > 0)
                 buffer = this._freeBuffers.pop();
             else {
-                buffer = new PackageBuffer(FREE_BUFFER_SEND_PLACEHOLDER,
-                    () => this.isConnected(),this.options);
+                buffer = new PackageBuffer(FREE_BUFFER_SEND_PLACEHOLDER,ALWAYS_OPEN,this.options);
                 buffer.afterFlush = () => this._freeGroupBuffer(group);
             }
             buffer!.send = (messages,batches) =>
                 this._multiSend(group,messages,batches);
+            buffer!.isOpen = () => this.isConnected(group);
             this._usedBuffers.set(group,buffer!);
         }
         return buffer!;
@@ -106,6 +107,7 @@ export default class DynamicGroupTransport {
         if(!buffer || buffer.getBufferLength() > 0) return false;
 
         buffer.send = FREE_BUFFER_SEND_PLACEHOLDER;
+        buffer.isOpen = ALWAYS_OPEN;
         this._usedBuffers.delete(group);
 
         if(this._freeBuffers.length < this.options.freeBufferMaxPoolSize)
@@ -143,7 +145,7 @@ export default class DynamicGroupTransport {
      */
     transmit(group: string,receiver: string, data?: any, options: BatchOption & ComplexTypesOption = {}) {
         const pack = Transport.prepareMultiTransmit(receiver,data,options);
-        if(!this.isConnected()) this.getGroupBuffer(group).add(pack);
+        if(!this.isConnected(group)) this.getGroupBuffer(group).add(pack);
         else if(options.batch) this.getGroupBuffer(group).add(pack,options.batch);
         else this._directSendMultiTransmit(group,pack);
     }
