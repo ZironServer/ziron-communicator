@@ -49,7 +49,7 @@ export default class GroupTransport {
              * When the underlying source does not have a disconnected state,
              * the function can always return true.
              * Notice that you should flush the buffer on a reconnection
-             * when the underlying source has a disconnected state.
+             * when the underlying source has a temporarily disconnected state.
              */
             isConnected?: () => boolean
         } = {},
