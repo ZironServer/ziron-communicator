@@ -135,7 +135,12 @@ export default class Transport {
 
     public hasLowSendBackpressure: () => boolean;
 
-    public readonly badConnectionTimestamp: number = -1;
+    /**
+     * @description
+     * A new bad connection stamp is generated whenever a bad connection is emitted.
+     * The stamp can be used to check if the connection was lost in-between times.
+     */
+    public readonly badConnectionStamp: number = Number.MIN_SAFE_INTEGER;
 
     constructor(
         connector: {
@@ -283,7 +288,7 @@ export default class Transport {
         (this as Writable<Transport>).open = false;
         this.buffer.clearBatchTime();
         const err = new BadConnectionError(type,msg);
-        (this as Writable<Transport>).badConnectionTimestamp = Date.now();
+        (this as Writable<Transport>).badConnectionStamp = this._generateNewBadConnectionStamp();
         this._rejectBinaryContentResolver(err);
         this._rejectInvokeRespPromises(err);
         this._emitBadConnectionToStreams();
@@ -315,6 +320,11 @@ export default class Transport {
     private _getNewBinaryContentPacketId() {
         if(this._binaryContentPacketId > Number.MAX_SAFE_INTEGER) this._binaryContentPacketId = 0;
         return this._binaryContentPacketId++;
+    }
+
+    private _generateNewBadConnectionStamp() {
+        return this.badConnectionStamp > Number.MAX_SAFE_INTEGER ?
+            Number.MIN_SAFE_INTEGER : this.badConnectionStamp + 1;
     }
 
     private _getNewCid(): number {
@@ -494,16 +504,16 @@ export default class Transport {
     private _processInvoke(procedure: string, callId: number, data: any, dataType: DataType) {
         let called;
         try {
-            const badConnectionTimestamp = this.badConnectionTimestamp;
+            const badConnectionTimestamp = this.badConnectionStamp;
             this.onInvoke(procedure, data,(data, processComplexTypes) => {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
-                if(badConnectionTimestamp !== this.badConnectionTimestamp) return;
+                if(badConnectionTimestamp !== this.badConnectionStamp) return;
                 this._sendInvokeDataResp(callId, data, processComplexTypes);
             }, (err) => {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
-                if(badConnectionTimestamp !== this.badConnectionTimestamp) return;
+                if(badConnectionTimestamp !== this.badConnectionStamp) return;
                 this.send(PacketType.InvokeErrResp + ',' +
                     callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err))));
             },dataType);

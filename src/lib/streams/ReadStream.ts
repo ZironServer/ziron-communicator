@@ -101,7 +101,7 @@ export default class ReadStream<T = any> {
     private _chain: Promise<any>;
     private _chainChunkSize: number;
 
-    private readonly _createdBadConnectionTimestamp: number;
+    private readonly _createdBadConnectionStamp: number;
 
     /*
     Timeout to close unused streams.
@@ -160,12 +160,12 @@ export default class ReadStream<T = any> {
             enumerable: false,
             writable: true
         });
-        Object.defineProperty(this, "_createdBadConnectionTimestamp", {
+        Object.defineProperty(this, "_createdBadConnectionStamp", {
             enumerable: false,
             writable: true
         });
         this._transport = transport;
-        this._createdBadConnectionTimestamp = transport.badConnectionTimestamp;
+        this._createdBadConnectionStamp = transport.badConnectionStamp;
     }
 
     /**
@@ -201,7 +201,7 @@ export default class ReadStream<T = any> {
         if(this.state !== StreamState.Pending)
             throw new Error("Cannot accept a not pending ReadStream.");
 
-        if(this._createdBadConnectionTimestamp !== this._transport.badConnectionTimestamp) {
+        if(this._createdBadConnectionStamp !== this._transport.badConnectionStamp) {
             //The connection was lost in-between time.
             //When the stream is not registered in the transporter,
             // it is needed because then the stream will not be notified of a connection lost.
@@ -252,7 +252,7 @@ export default class ReadStream<T = any> {
      */
     close(errorCode: StreamErrorCloseCode | number) {
         if(this.state === StreamState.Closed) return;
-        if(this._createdBadConnectionTimestamp !== this._transport.badConnectionTimestamp) {
+        if(this._createdBadConnectionStamp !== this._transport.badConnectionStamp) {
             //The connection was lost in-between time.
             //When the stream is not registered in the transporter,
             // it is needed because then the stream will not be notified of a connection lost.
