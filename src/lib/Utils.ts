@@ -77,7 +77,8 @@ export function unescapePlaceholderSequence(key: string): string {
 }
 
 /**
- * todo ..
+ * @description
+ * Utility function to send a package.
  * @param pack
  * @param send
  */
