@@ -60,6 +60,8 @@ export interface TransportOptions extends PackageBufferOptions {
      * @description
      * Defines the default timeout in milliseconds for
      * receiving the response of an invoke.
+     * The timeout only starts when the data of the invoke is completely transmitted,
+     * and all containing streams are closed.
      * Notice that an individual response timeout can be specified for
      * an invoke that overrides this option value.
      * @default 10000

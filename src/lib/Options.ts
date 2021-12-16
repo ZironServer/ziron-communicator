@@ -25,7 +25,9 @@ export interface ResponseTimeoutOption {
     /**
      * @description
      * Defines the timeout in milliseconds for
-     * receiving the response of an invoke.
+     * receiving the response of an invoke by overriding the default response timeout.
+     * The timeout only starts when the data of the invoke is completely transmitted,
+     * and all containing streams are closed.
      */
     responseTimeout?: number | null
 }
