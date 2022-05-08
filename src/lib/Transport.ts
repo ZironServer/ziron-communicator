@@ -1222,4 +1222,11 @@ export default class Transport {
         return data;
     }
 
+    connect(transport: Transport) {
+        let outgoingChain = Promise.resolve();
+        this.send = msg => outgoingChain = outgoingChain.then(() => transport.emitMessage(msg));
+        let incomingChain = Promise.resolve();
+        transport.send = msg => incomingChain = incomingChain.then(() => this.emitMessage(msg));
+    }
+
 }
