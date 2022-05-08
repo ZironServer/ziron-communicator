@@ -60,11 +60,8 @@ const dynamicGroup = new DynamicGroupTransport({
 });
 
 //connect
-comA1.send = comB1.emitMessage.bind(comB1);
-comB1.send = comA1.emitMessage.bind(comA1);
-
-comA2.send = comB2.emitMessage.bind(comB2);
-comB2.send = comA2.emitMessage.bind(comA2);
+comA1.connect(comB1);
+comA2.connect(comB2);
 
 function concatenateBuffer(...arrays: ArrayBuffer[]): ArrayBuffer {
   const size = arrays.reduce((a,b) => a + b.byteLength, 0)
