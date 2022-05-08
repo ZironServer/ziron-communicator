@@ -183,8 +183,6 @@ export default class Transport {
             () => this.open,options);
     }
 
-    private _processQueue: Promise<void> = Promise.resolve();
-
     /**
      * Can not be reset on connection lost
      * because packages with old ids can exist.
@@ -393,16 +391,14 @@ export default class Transport {
             case PacketType.Transmit:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 return this._processData(packet['2'],packet['3'],packet['4'],(err,data) => {
-                    if(!err) this._processQueue = this._processQueue.then(() =>
-                        this._processTransmit(packet['1'],data,packet['2']));
+                    if(!err) this._processTransmit(packet['1'],data,packet['2']);
                     else this.onInvalidMessage(err);
                 });
             case PacketType.Invoke:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
                 return this._processData(packet['3'],packet['4'],packet['5'],(err,data) => {
-                    if(!err) this._processQueue = this._processQueue.then(() =>
-                        this._processInvoke(packet['1'],packet['2'],data,packet['3']));
+                    if(!err) this._processInvoke(packet['1'],packet['2'],data,packet['3']);
                     else this.onInvalidMessage(err);
                 });
             case PacketType.InvokeDataResp:
@@ -411,8 +407,7 @@ export default class Transport {
                     clearTimeout(resp.timeout!);
                     delete this._invokeResponsePromises[packet['1']];
                     return this._processData(packet['2'],packet['3'],packet['4'], (err,data) => {
-                        if(!err) this._processQueue = this._processQueue.then(() =>
-                            resp.resolve(resp.returnDataType ? [data,packet['2']] : data));
+                        if(!err) resp.resolve(resp.returnDataType ? [data,packet['2']] : data);
                         else this.onInvalidMessage(err);
                     })
                 }
