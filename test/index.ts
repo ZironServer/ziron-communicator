@@ -1173,6 +1173,29 @@ describe('Ziron', () => {
       }).to.throw(InsufficientBufferSizeError);
     });
 
+    it(`Mixed invoke and transmit messages order should be stable.`, (end) => {
+      const count = 500;
+      const sent: number[] = [];
+      const received: number[] = [];
+
+      const handler = (target: string,msg: any) => {
+        expect(target).to.be.equal("order");
+        received.push(msg);
+
+        if(received.length === count) {
+          expect(received).to.be.deep.equal(sent);
+          end();
+        }
+      }
+      comB1.onInvoke = handler;
+      comB1.onTransmit = handler;
+
+      for(let i = 0; i < count; i++) {
+        sent.push(i);
+        if(i % 2 === 0) comA1.transmit('order',i);
+        else comA1.invoke('order',i);
+      }
+    });
   });
 
   describe('GroupTransport (Utility)', () => {
