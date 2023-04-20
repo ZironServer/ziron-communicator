@@ -245,7 +245,8 @@ export default class WriteStream<B extends boolean = false> {
             this._resolveSizePermissionWait();
     }
 
-    private async binaryWrite(data: ArrayBuffer): Promise<boolean> {
+    private async binaryWrite(data: ArrayBuffer | null): Promise<boolean> {
+        if(data === null) return this.end();
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this._eofSent) throw new Error("Can not write when end was already called.");
@@ -282,6 +283,7 @@ export default class WriteStream<B extends boolean = false> {
     }
 
     private async objectWrite(data: any, processComplexTypes?: boolean): Promise<boolean> {
+        if(data === null) return this.end();
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this._eofSent) throw new Error("Can not write when end was already called.");
