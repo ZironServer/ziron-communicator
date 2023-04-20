@@ -100,6 +100,7 @@ export default class WriteStream<B extends boolean = false> {
      * @description
      * A promise that gets resolved when the stream opens.
      * Notice the promise is still resolved when the stream has opened and closed.
+     * Keep in mind that in some cases, when the stream gets closed directly without being opened, the promise will never resolve.
      */
     public readonly opened: Promise<void> = new Promise(resolve => this._openedPromiseResolve = resolve);
 
