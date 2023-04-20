@@ -113,7 +113,7 @@ export type StreamDataPermissionPacket = [PacketType.StreamDataPermission,number
  * Indexes:
  * 0: PacketType
  * 1: StreamId
- * 2: Error code
+ * 2: Close code
  */
 export type WriteStreamClosePacket = [PacketType.WriteStreamClose,number,number];
 
@@ -121,7 +121,7 @@ export type WriteStreamClosePacket = [PacketType.WriteStreamClose,number,number]
  * Indexes:
  * 0: PacketType
  * 1: StreamId
- * 2: Error code
+ * 2: Close code (undefined means 200)
  */
 export type ReadStreamClosePacket = [PacketType.ReadStreamClose,number,number?];
 

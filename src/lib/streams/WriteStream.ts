@@ -5,7 +5,7 @@ Copyright(c) Ing. Luca Gian Scaringella
  */
 
 import Transport from "../Transport";
-import {StreamErrorCloseCode} from "./StreamErrorCloseCode";
+import {StreamCloseCode} from "./StreamCloseCode";
 import {StreamState} from "./StreamState";
 import {Writable} from "../Utils";
 
@@ -86,13 +86,13 @@ export default class WriteStream<B extends boolean = false> {
 
     private _writeLock: boolean = false;
 
-    private _closePromiseResolve: (errorCode: StreamErrorCloseCode | number | undefined) => void;
+    private _closePromiseResolve: (closeCode: StreamCloseCode | number) => void;
 
     /**
      * @description
-     * A promise that gets resolved with the error code when the stream closes.
+     * A promise that gets resolved on stream closure with the close code.
      */
-    public readonly closed: Promise<StreamErrorCloseCode | number | undefined> = new Promise(resolve => this._closePromiseResolve = resolve);
+    public readonly closed: Promise<StreamCloseCode | number> = new Promise(resolve => this._closePromiseResolve = resolve);
 
     private _openedPromiseResolve: () => void;
 
@@ -106,10 +106,9 @@ export default class WriteStream<B extends boolean = false> {
 
     /**
      * @description
-     * When the stream is closed with an error,
-     * this property can be used to access the error code.
+     * This property can be used to access the close code when the stream has been closed.
      */
-    public readonly errorCode?: StreamErrorCloseCode | number;
+    public readonly closeCode?: StreamCloseCode | number;
 
     private _id: number;
     private _transport: Transport;
@@ -171,7 +170,7 @@ export default class WriteStream<B extends boolean = false> {
     _onTransmitted() {
         if(this.transmitted || this.state !== StreamState.Pending) return;
         (this as Writable<WriteStream>).transmitted = true;
-        this._acceptTimeoutTicker = setTimeout(() => this.close(StreamErrorCloseCode.AcceptTimeout),
+        this._acceptTimeoutTicker = setTimeout(() => this.close(StreamCloseCode.AcceptTimeout),
             this.acceptTimeout);
     }
 
@@ -184,11 +183,11 @@ export default class WriteStream<B extends boolean = false> {
             //Stream is already locally closed (Inform the ReadStream again...)
             //It can happen that this stream was closed in the pending state and the
             //ReadStream could not receive the close package.
-            return this._transport._sendWriteStreamClose(this._id,this.errorCode ?? StreamErrorCloseCode.Abort);
+            return this._transport._sendWriteStreamClose(this._id,this.closeCode ?? StreamCloseCode.Abort);
         }
         else if(this.state !== StreamState.Pending) {
             //Some strange behaviour close the stream and inform ReadStream...
-            return this.close(StreamErrorCloseCode.Abort);
+            return this.close(StreamCloseCode.Abort);
         }
 
         clearTimeout(this._acceptTimeoutTicker);
@@ -212,7 +211,7 @@ export default class WriteStream<B extends boolean = false> {
             let timeoutTicker;
             if(this.sizePermissionTimeout != null) {
                 timeoutTicker = setTimeout(() =>
-                    this.close(StreamErrorCloseCode.SizePermissionTimeout),this.sizePermissionTimeout)
+                    this.close(StreamCloseCode.SizePermissionTimeout),this.sizePermissionTimeout)
             }
             this._resolveSizePermissionWait = (err?: Error) => {
                 clearTimeout(timeoutTicker);
@@ -365,7 +364,7 @@ export default class WriteStream<B extends boolean = false> {
      * Don't call this method when the previous write promise is not resolved yet.
      * The returned promise resolves to true when the package/s has been transmitted successfully and
      * to false when the operation failed because of closure.
-     * The WriteStream will close with a successful state when the ReadStream has
+     * The WriteStream will close with an end close code when the ReadStream has
      * informed the WriteStream that all chunks have been processed successfully.
      * In optimal cases, the method packages the chunk and EOF indication in a single package.
      */
@@ -393,7 +392,7 @@ export default class WriteStream<B extends boolean = false> {
         this._eofSent = true;
         if(this.endClosureTimeout != null && this._endClosureTimeoutTicker == null) {
             this._endClosureTimeoutTicker = setTimeout(() => {
-                this.close(StreamErrorCloseCode.EndClosureTimeout);
+                this.close(StreamCloseCode.EndClosureTimeout);
             },this.endClosureTimeout);
         }
     }
@@ -402,39 +401,40 @@ export default class WriteStream<B extends boolean = false> {
      * @internal
      */
     _emitBadConnection() {
-        this._close(StreamErrorCloseCode.BadConnection,false)
+        this._close(StreamCloseCode.BadConnection,false)
     }
 
     /**
      * @internal
      */
-    _readStreamClose(errorCode?: StreamErrorCloseCode | number) {
-        this._close(errorCode,true);
+    _readStreamClose(closeCode: StreamCloseCode | number) {
+        this._close(closeCode,true);
     }
 
     /**
      * @description
-     * Returns if the WriteStream has been closed without an error code.
+     * Returns if the WriteStream has been closed successfully (end close code).
      */
-    get successfullyClosed(): boolean {
-        return this.state === StreamState.Closed && this.errorCode == null;
+    get closedSuccessfully(): boolean {
+        return this.state === StreamState.Closed && this.closeCode === StreamCloseCode.End;
     }
 
     /**
-     * Use this method to close the Write- and Read-Stream in case of an error immediately.
+     * Use this method to close the Write- and Read-Stream immediately with a close code in abnormal cases.
      * To indicate that all chunks have been sent you should use the end method and not the close method.
-     * @param errorCode
+     * @param closeCode
      */
-    close(errorCode: StreamErrorCloseCode | number) {
+    close(closeCode: Exclude<StreamCloseCode,StreamCloseCode.End> | number) {
+        if(closeCode === StreamCloseCode.End) throw new Error("A write stream can not immediately close the Write- and Read-Stream successfully. Use the end method to indicate the stream data end!")
         if(this.state === StreamState.Closed) return;
-        if(this.state !== StreamState.Unused) this._transport._sendWriteStreamClose(this._id,errorCode);
-        this._close(errorCode,true);
+        if(this.state !== StreamState.Unused) this._transport._sendWriteStreamClose(this._id,closeCode);
+        this._close(closeCode,true);
     }
 
-    private _close(errorCode?: StreamErrorCloseCode | number, rmFromTransport: boolean = true) {
+    private _close(closeCode: StreamCloseCode | number, rmFromTransport: boolean = true) {
         if(this.state === StreamState.Closed) return;
         (this as Writable<WriteStream>).state = StreamState.Closed;
-        (this as Writable<WriteStream>).errorCode = errorCode;
+        (this as Writable<WriteStream>).closeCode = closeCode;
         clearTimeout(this._acceptTimeoutTicker);
         clearTimeout(this._endClosureTimeoutTicker);
         if(rmFromTransport) this._transport._removeWriteStream(this._id);
@@ -442,7 +442,7 @@ export default class WriteStream<B extends boolean = false> {
             this._resolveSizePermissionWait(new Error("Stream is closed."));
         if(this._cancelLowSendBackpressureWait)
             this._cancelLowSendBackpressureWait(new Error("Stream is closed."));
-        this._closePromiseResolve(errorCode);
+        this._closePromiseResolve(closeCode);
     }
 
     /**

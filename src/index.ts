@@ -12,7 +12,7 @@ import Transport, {
     TransportOptions
 } from "./lib/Transport";
 import ReadStream, {ChunkMiddleware} from "./lib/streams/ReadStream";
-import {StreamErrorCloseCode} from "./lib/streams/StreamErrorCloseCode";
+import {StreamCloseCode} from "./lib/streams/StreamCloseCode";
 import {StreamState} from "./lib/streams/StreamState";
 import {DataType, analyseTypeofData, containsStreams, containsBinaries, isMixedJSONDataType} from "./lib/DataType";
 import {
@@ -51,7 +51,7 @@ export {
     ReadStream,
     ChunkMiddleware,
     StreamCloseError,
-    StreamErrorCloseCode,
+    StreamCloseCode,
     StreamState,
     TimeoutError,
     TimeoutType,

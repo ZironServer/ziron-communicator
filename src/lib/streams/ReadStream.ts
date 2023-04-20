@@ -5,7 +5,7 @@ Copyright(c) Ing. Luca Gian Scaringella
  */
 
 import {Writable} from "../Utils";
-import {StreamErrorCloseCode} from "./StreamErrorCloseCode";
+import {StreamCloseCode} from "./StreamCloseCode";
 import {StreamState} from "./StreamState";
 import Transport from "../Transport";
 import {DataType} from "../DataType";
@@ -129,13 +129,13 @@ export default class ReadStream<T = any> {
     }
     private _chunkMiddleware?: ChunkMiddleware<T>;
 
-    private _closedPromiseResolve: (errorCode?: StreamErrorCloseCode | number) => void;
+    private _closedPromiseResolve: (closeCode: StreamCloseCode | number) => void;
 
     /**
      * @description
-     * A promise that gets resolved with the error code when the stream closes.
+     * A promise that gets resolved on stream closure with the close code.
      */
-    public readonly closed: Promise<StreamErrorCloseCode | number | undefined> = new Promise(resolve => this._closedPromiseResolve = resolve);
+    public readonly closed: Promise<StreamCloseCode | number> = new Promise(resolve => this._closedPromiseResolve = resolve);
 
     private _openedPromiseResolve: () => void;
 
@@ -148,10 +148,9 @@ export default class ReadStream<T = any> {
 
     /**
      * @description
-     * When the stream is closed with an error,
-     * this property can be used to access the error code.
+     * This property can be used to access the close code when the stream has been closed.
      */
-    public readonly errorCode?: StreamErrorCloseCode | number;
+    public readonly closeCode?: StreamCloseCode | number;
 
     private readonly _transport: Transport;
 
@@ -187,10 +186,10 @@ export default class ReadStream<T = any> {
 
     /**
      * @description
-     * Returns if the ReadStream has been closed without an error code.
+     * Returns if the ReadStream has been closed successfully (end close code).
      */
-    get successfullyClosed(): boolean {
-        return this.state === StreamState.Closed && this.errorCode == null;
+    get closedSuccessfully(): boolean {
+        return this.state === StreamState.Closed && this.closeCode === StreamCloseCode.End;
     }
 
     /**
@@ -239,18 +238,19 @@ export default class ReadStream<T = any> {
 
     /**
      * @description
-     * Use this method to close the Read- and Write-Stream with an error code immediately.
-     * The method is helpful to deny a stream or abort a stream.
-     * It can only be used when the ReadStream is not already closed.
+     * Use this method to close the Write- and Read-Stream immediately with a close code.
+     * The method is helpful to deny or abort a stream.
+     * It can also be used to close an unlimited stream successfully.
+     * Notice that the method can not be used when the ReadStream is already closed.
      * When a read chunk is invalid, you should not use this method to close the stream in an error state.
      * Instead, you should use the chunk middleware.
      * Because when the ReadStream has processed the last chunks successfully and
      * pushed them in the buffer, it closes without an error.
      * You can still read the chunks, but when you determine that a chunk is incompatible,
-     * it is not possible to close the ReadStream with an error because it is already closed successfully.
-     * @param errorCode
+     * it is not possible to close the ReadStream with a code because it is already closed successfully.
+     * @param closeCode
      */
-    close(errorCode: StreamErrorCloseCode | number) {
+    close(closeCode: StreamCloseCode | number) {
         if(this.state === StreamState.Closed) return;
         if(this._createdBadConnectionStamp !== this._transport.badConnectionStamp) {
             //The connection was lost in-between time.
@@ -258,8 +258,8 @@ export default class ReadStream<T = any> {
             // it is needed because then the stream will not be notified of a connection lost.
             return this._emitBadConnection();
         }
-        this._transport._sendReadStreamClose(this.id,errorCode);
-        this._close(errorCode);
+        this._transport._sendReadStreamClose(this.id,closeCode);
+        this._close(closeCode);
     }
 
     private _checkAllowMore(applyMinimum?: boolean) {
@@ -341,7 +341,7 @@ export default class ReadStream<T = any> {
      * It is highly recommended to specify a sizeLimit in the accept method when using this method.
      * Internally it uses the read method,
      * so only use this method or either the read method.
-     * The method throws an StreamCloseError when the stream is closed with an error.
+     * The method throws a StreamCloseError when the stream has been closed with an abnormal close code.
      * @throws StreamCloseError
      */
     async readAll(): Promise<T[]> {
@@ -351,15 +351,16 @@ export default class ReadStream<T = any> {
             buffer.push(chunk);
             chunk = await this.read();
         }
-        if(this.errorCode == null) return buffer;
-        else throw new StreamCloseError(this.errorCode);
+        if(this.closeCode !== StreamCloseCode.End)
+            throw new StreamCloseError(this.closeCode!);
+        return buffer;
     }
 
     private _setChunkTimeout() {
         if(!this._chunkTimeoutActive) return;
         this._clearChunkTimeout(); //for safety to not overwrite an already existing timeout
         this._chunkTimeoutTick =
-            setTimeout(() => this.close(StreamErrorCloseCode.ChunkTimeout), this._chunkTimeout);
+            setTimeout(() => this.close(StreamCloseCode.ChunkTimeout), this._chunkTimeout);
     }
 
     private _emptyChunksCheck() {
@@ -383,7 +384,7 @@ export default class ReadStream<T = any> {
             // The chunks in a binary stream are sent via binary
             // packets to resolving the data async is not needed.
             if(this.binary && !(chunk instanceof ArrayBuffer)) {
-                this.close(StreamErrorCloseCode.InvalidChunk);
+                this.close(StreamCloseCode.InvalidChunk);
                 return this._transport.onInvalidMessage(new Error('Invalid stream chunk.'));
             }
 
@@ -395,7 +396,7 @@ export default class ReadStream<T = any> {
             if(
                 (this._sizeLimit != null && (this._receivedSize + size) > this._sizeLimit) ||
                 (size + this._receivedSize > this._allowedSize)
-            ) return this.close(StreamErrorCloseCode.SizeLimitExceeded);
+            ) return this.close(StreamCloseCode.SizeLimitExceeded);
 
             this._receivedSize += size;
 
@@ -419,7 +420,7 @@ export default class ReadStream<T = any> {
             if(this._chainCancel) return;
 
             if(this._chunkMiddleware && !await this._chunkMiddleware(chunk, c => chunk = c as any,type)) {
-                this.close(StreamErrorCloseCode.InvalidChunk);
+                this.close(StreamCloseCode.InvalidChunk);
                 return this._transport.onInvalidMessage(new Error('Invalid stream chunk.'));
             }
 
@@ -439,7 +440,7 @@ export default class ReadStream<T = any> {
             }
         }
         catch (e) {
-            this.close(StreamErrorCloseCode.InvalidChunk);
+            this.close(StreamCloseCode.InvalidChunk);
             this._transport.onInvalidMessage(e);
         }
     }
@@ -457,7 +458,7 @@ export default class ReadStream<T = any> {
 
     private _processChainEnd() {
         this._transport._sendReadStreamClose(this.id);
-        this._close(undefined,true);
+        this._close(StreamCloseCode.End,true);
     }
 
     // noinspection JSUnusedGlobalSymbols
@@ -465,7 +466,7 @@ export default class ReadStream<T = any> {
      * @internal
      */
     _emitBadConnection() {
-        this._close(StreamErrorCloseCode.BadConnection,false);
+        this._close(StreamCloseCode.BadConnection,false);
     }
 
     private _cancelChunkChain() {
@@ -477,10 +478,18 @@ export default class ReadStream<T = any> {
     /**
      * @internal
      */
-    _close(errorCode?: StreamErrorCloseCode | number, rmFromTransport: boolean = true) {
+    _writeStreamClose(closeCode: Exclude<StreamCloseCode,StreamCloseCode.End> | number) {
+        this._close(closeCode !== StreamCloseCode.End ?
+            closeCode : StreamCloseCode.InvalidAction,true);
+    }
+
+    /**
+     * @internal
+     */
+    _close(closeCode: StreamCloseCode | number, rmFromTransport: boolean = true) {
         if(this.state === StreamState.Closed) return;
         (this as Writable<ReadStream>).state = StreamState.Closed;
-        (this as Writable<ReadStream>).errorCode = errorCode;
+        (this as Writable<ReadStream>).closeCode = closeCode;
         this._cancelChunkChain();
         this._clearChunkTimeout();
         if(this.readResolve) {
@@ -490,7 +499,7 @@ export default class ReadStream<T = any> {
             resolve(null);
         }
         if(rmFromTransport) this._transport._removeReadStream(this.id);
-        this._closedPromiseResolve(errorCode);
+        this._closedPromiseResolve(closeCode);
     }
 
     /**

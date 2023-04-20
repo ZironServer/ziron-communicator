@@ -4,10 +4,10 @@ GitHub: LucaCode
 Copyright(c) Ing. Luca Gian Scaringella
  */
 
-import {StreamErrorCloseCode} from "./StreamErrorCloseCode";
+import {StreamCloseCode} from "./StreamCloseCode";
 
 export default class StreamCloseError extends Error {
-    constructor(public readonly code: StreamErrorCloseCode) {
-        super(`The stream was closed with the error code: ${code}.`);
+    constructor(public readonly code: StreamCloseCode) {
+        super(`The stream was closed with the code: ${code}.`);
     }
 }

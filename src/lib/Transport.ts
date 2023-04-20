@@ -18,7 +18,7 @@ import {dehydrateError, hydrateError} from "./ErrorUtils";
 import {decodeJson, encodeJson, JSONString} from "./JsonUtils";
 import ReadStream from "./streams/ReadStream";
 import WriteStream from "./streams/WriteStream";
-import {StreamErrorCloseCode} from "./streams/StreamErrorCloseCode";
+import {StreamCloseCode} from "./streams/StreamCloseCode";
 import {
     CorkFunction,
     escapeJSONString,
@@ -444,17 +444,17 @@ export default class Transport {
         if(stream) stream._addDataPermission(size);
     }
 
-    private _processReadStreamClose(streamId: number, errorCode?: StreamErrorCloseCode | number) {
-        if(typeof errorCode !== 'number' && typeof errorCode !== 'undefined')
+    private _processReadStreamClose(streamId: number, closeCode?: StreamCloseCode | number) {
+        if(typeof closeCode !== 'number' && typeof closeCode !== 'undefined')
             throw new Error('Invalid close code data type to close a stream.');
         const stream = this._activeWriteStreams[streamId];
-        if(stream) stream._readStreamClose(errorCode);
+        if(stream) stream._readStreamClose(closeCode ?? StreamCloseCode.End);
     }
 
-    private _processJsonWriteStreamClose(streamId: number, code: StreamErrorCloseCode | number) {
-        if(typeof code !== 'number') throw new Error('Invalid close code data type to close a stream.');
+    private _processJsonWriteStreamClose(streamId: number, closeCode: StreamCloseCode | number) {
+        if(typeof closeCode !== 'number') throw new Error('Invalid close code data type to close a stream.');
         const stream = this._activeReadStreams[streamId];
-        if(stream) stream._close(code);
+        if(stream) stream._writeStreamClose(closeCode);
     }
 
     private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any, binariesPacketId?: number) {
@@ -1114,23 +1114,23 @@ export default class Transport {
      * Only use when the connection was not lost in-between time.
      * @internal
      * @param streamId
-     * @param errorCode
+     * @param closeCode
      * @private
      */
-    _sendReadStreamClose(streamId: number, errorCode?: number) {
+    _sendReadStreamClose(streamId: number, closeCode?: number) {
         this.send(PacketType.ReadStreamClose + ',' + streamId +
-            (errorCode != null ? (',' + errorCode) : ''));
+            (closeCode != null ? (',' + closeCode) : ''));
     }
 
     /**
      * Only use when the connection was not lost in-between time.
      * @internal
      * @param streamId
-     * @param errorCode
+     * @param closeCode
      * @private
      */
-    _sendWriteStreamClose(streamId: number, errorCode: number) {
-        this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + errorCode);
+    _sendWriteStreamClose(streamId: number, closeCode: number) {
+        this.send(PacketType.WriteStreamClose + ',' + streamId + ',' + closeCode);
     }
 
     /**

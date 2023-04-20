@@ -7,7 +7,7 @@ import {
   Package,
   ReadStream,
   StreamCloseError,
-  StreamErrorCloseCode,
+  StreamCloseCode,
   StreamState,
   TimeoutError,
   Transport,
@@ -539,9 +539,9 @@ describe('Ziron', () => {
             if(!test.binary) await (writeStream as WriteStream<false>).write(test.data[i],test.processComplexTypes);
             else await (writeStream as WriteStream<true>).write(test.data[i]);
           }
-          if(!test.binary) (writeStream as WriteStream<false>)
+          if(!test.binary) await (writeStream as WriteStream<false>)
               .end(test.data[test.data.length - 1],test.processComplexTypes);
-          else (writeStream as WriteStream<true>)
+          else await (writeStream as WriteStream<true>)
               .end(test.data[test.data.length - 1]);
         })();
 
@@ -563,8 +563,8 @@ describe('Ziron', () => {
             chunk = await data.read();
             i++;
           }
-          expect(data.errorCode).to.be.equal(undefined);
-          expect(data.successfullyClosed).to.be.equal(true);
+          expect(data.closeCode).to.be.equal(StreamCloseCode.End);
+          expect(data.closedSuccessfully).to.be.equal(true);
           expect(test.binary ? concatenateBuffer(...chunks) : chunks).to.be.deep
               .equal(test.binary ? concatenateBuffer(...test.data) : test.data);
           done();
@@ -641,7 +641,7 @@ describe('Ziron', () => {
     it("Ignored read stream should end write stream with an accept timeout.", (done) => {
       const writeStream = new WriteStream(false,{acceptTimeout: 60});
       writeStream.closed.then((code) => {
-        expect(code).to.be.equal(StreamErrorCloseCode.AcceptTimeout);
+        expect(code).to.be.equal(StreamCloseCode.AcceptTimeout);
         done();
       });
       comB1.onTransmit = (receiver,data: ReadStream) => {
@@ -657,7 +657,7 @@ describe('Ziron', () => {
         expect(receiver).to.be.equal('streamChunkTimeout');
 
         data.closed.then((code) => {
-          expect(code).to.be.equal(StreamErrorCloseCode.ChunkTimeout);
+          expect(code).to.be.equal(StreamCloseCode.ChunkTimeout);
           done();
         });
         data.accept({
@@ -674,7 +674,7 @@ describe('Ziron', () => {
         sizePermissionTimeout: 50
       });
       writeStream.closed.then((code) => {
-        expect(code).to.be.equal(StreamErrorCloseCode.SizePermissionTimeout);
+        expect(code).to.be.equal(StreamCloseCode.SizePermissionTimeout);
         done();
       });
 
@@ -697,7 +697,7 @@ describe('Ziron', () => {
         endClosureTimeout: 50
       });
       writeStream.closed.then((code) => {
-        expect(code).to.be.equal(StreamErrorCloseCode.EndClosureTimeout);
+        expect(code).to.be.equal(StreamCloseCode.EndClosureTimeout);
         done();
       });
 
@@ -789,7 +789,7 @@ describe('Ziron', () => {
         expect(data.state).to.be.equal(StreamState.Pending);
 
         data.closed.then((code) => {
-          expect(code).to.be.equal(StreamErrorCloseCode.BadConnection);
+          expect(code).to.be.equal(StreamCloseCode.BadConnection);
           done();
           comB1.emitConnection();
         });
@@ -818,7 +818,7 @@ describe('Ziron', () => {
         })
 
         writeStream.closed.then((code) => {
-          expect(code).to.be.equal(StreamErrorCloseCode.SizeLimitExceeded);
+          expect(code).to.be.equal(StreamCloseCode.SizeLimitExceeded);
           done();
         });
 
@@ -847,7 +847,7 @@ describe('Ziron', () => {
 
       expect(readStream).to.be.instanceOf(ReadStream);
       expect(readStream!.state).to.be.equal(StreamState.Pending);
-      readStream!.close(StreamErrorCloseCode.Abort);
+      readStream!.close(StreamCloseCode.Abort);
       await expect(readStream!.readAll()).to.be.rejectedWith(StreamCloseError);
     });
   });
